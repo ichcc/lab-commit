@@ -14,9 +14,9 @@ resource "helm_release" "keda" {
       webhooks         = { registry = local.ecr, repository = "mirror/kedacore/keda-admission-webhooks", tag = var.keda_image_tag }
     }
     resources = {
-      operator      = { requests = { cpu = "250m", memory = "512Mi" } }
-      metricServer  = { requests = { cpu = "250m", memory = "512Mi" } }
-      webhooks      = { requests = { cpu = "250m", memory = "512Mi" } }
+      operator     = { requests = { cpu = "250m", memory = "512Mi" } }
+      metricServer = { requests = { cpu = "250m", memory = "512Mi" } }
+      webhooks     = { requests = { cpu = "250m", memory = "512Mi" } }
     }
   })]
 

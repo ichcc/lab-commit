@@ -7,14 +7,14 @@ resource "helm_release" "lbc" {
   timeout    = 900
 
   values = [yamlencode({
-    clusterName   = local.cluster_name
-    region        = var.region
-    vpcId         = local.vpc_id
-    replicaCount  = 1
-    enableShield  = false
-    enableWaf     = false
-    enableWafv2   = false
-    image         = { repository = "${local.ecr}/ecr-public/eks/aws-load-balancer-controller" }
+    clusterName  = local.cluster_name
+    region       = var.region
+    vpcId        = local.vpc_id
+    replicaCount = 1
+    enableShield = false
+    enableWaf    = false
+    enableWafv2  = false
+    image        = { repository = "${local.ecr}/ecr-public/eks/aws-load-balancer-controller" }
     serviceAccount = {
       create      = true
       name        = "aws-load-balancer-controller"

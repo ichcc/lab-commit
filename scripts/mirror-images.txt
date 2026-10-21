@@ -1,0 +1,4 @@
+ghcr.io/kedacore/keda:2.21.0
+ghcr.io/kedacore/keda-metrics-apiserver:2.21.0
+ghcr.io/kedacore/keda-admission-webhooks:2.21.0
+docker.io/grafana/grafana:13.2.4

@@ -22,13 +22,18 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 - A new GitHub repository for this project
 - A region where EKS 1.35 and Fargate are available
 
+The lab runs in `il-central-1` (Tel Aviv). It is an opt-in region, so enable it first in the account settings. CodeConnections is not offered in this region, which shapes the pipeline design in stack 70.
+
 Verify the region before anything else:
 
 ```bash
-export AWS_REGION=eu-central-1
+export AWS_REGION=il-central-1
+aws account get-region-opt-status --region-name "$AWS_REGION"
 aws eks describe-addon-versions --kubernetes-version 1.35 --region "$AWS_REGION" --query 'addons[0].addonName'
 aws sts get-caller-identity
 ```
+
+Expected: `ENABLED`, an addon name, and your account id.
 
 ## Step 0: remove the default VPC
 

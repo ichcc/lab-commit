@@ -69,12 +69,18 @@ terraform apply
 Result:
 
 - VPC `10.20.0.0/16`, DNS hostnames enabled
-- 2 private subnets in 2 AZs, no internet gateway, no NAT
-- One route table with local routes and the S3 gateway endpoint
+- 2 private subnets in 2 AZs holding every workload
+- 1 small public subnet that contains only the fck-nat instance, with an internet gateway
+- fck-nat (t4g.micro, ASG-backed) giving the private route table a default route for outbound traffic, so Argo CD, CodeBuild and Helm can reach GitHub
+- One private route table with local routes, the S3 gateway endpoint and the NAT default route
 - Interface endpoints (ECR, STS, Logs, EC2, ELB, SSM, Secrets Manager, EKS, CodeBuild, KMS) in both subnets
-- Security groups: endpoints (443 from VPC), ALB (80/443 from VPC), Windows (egress only to VPC and S3)
+- Security groups: endpoints (443 from VPC), ALB (80/443 from VPC), Windows (egress only to VPC and S3, so it has no Internet access)
 
-Interface endpoints are the largest hourly cost in this stack. Remove entries from `interface_endpoints` that a later stack does not need.
+Nothing in the VPC is reachable from the Internet: the public subnet has no workloads, the load balancer is internal, and inbound traffic to the NAT instance is limited to the VPC CIDR.
+
+The fck-nat module is referenced without a version. After `terraform init`, pin it by appending `?ref=<tag>` to the `source` in `nat.tf` using a release tag of the module repository.
+
+Interface endpoints are the largest hourly cost in this stack. With NAT in place, ECR, STS, Logs, EKS, EC2, ELB, Secrets Manager, KMS and CodeBuild endpoints are optional and can be removed from `interface_endpoints` to save money. Keep `ssm`, `ssmmessages` and `ec2messages` for the Windows instance.
 
 ## Step 3: EKS
 

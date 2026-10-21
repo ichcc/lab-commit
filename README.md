@@ -9,7 +9,7 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 | 00-bootstrap | State bucket, budget alarms | done |
 | 10-network | VPC, 2 private subnets, endpoints, security groups | done |
 | 20-eks | Cluster 1.35, Fargate profiles, IRSA, ECR pull-through cache | done |
-| 30-platform | Load Balancer Controller, Argo CD, KEDA, Prometheus, Grafana | todo |
+| 30-platform | Load Balancer Controller, Argo CD, KEDA, Prometheus, Grafana | done |
 | 40-data | RDS PostgreSQL | todo |
 | 50-edge | Self-signed cert in ACM, private Route53 zone | todo |
 | 60-windows | Windows instance via SSM | todo |
@@ -118,6 +118,57 @@ kubectl -n kube-system rollout restart deployment coredns
 ```
 
 To lock the API down at the end of the lab set `public_endpoint = false` and re-apply from a host inside the VPC.
+
+## Step 4: mirror images that the pull-through cache cannot serve
+
+Fargate pods in private subnets pull only from ECR. The pull-through cache covers `public.ecr.aws`, `registry.k8s.io` and `quay.io` without credentials. KEDA (GHCR) and Grafana (Docker Hub) need credentials for a cache rule, so they are copied once instead:
+
+```bash
+./scripts/mirror-images.sh "$AWS_REGION"
+```
+
+Requirements: Docker with buildx, AWS CLI, and internet access from your workstation. The script logs in to ECR, creates `mirror/<name>` repositories and copies the multi-arch manifests listed in `scripts/mirror-images.txt`. Tags in that file must match `keda_image_tag` and `grafana_image_tag` in the platform stack.
+
+## Step 5: platform
+
+```bash
+cd terraform/30-platform
+cp backend.hcl.example backend.hcl
+cp example.tfvars terraform.tfvars
+terraform init -backend-config=backend.hcl
+terraform apply
+```
+
+Terraform runs Helm from your workstation, so the EKS public endpoint must still allow your IP (`admin_cidrs` in stack 20) and `aws` must be on `PATH` for token generation. Charts download from the public Helm repositories on your machine. Images come from ECR.
+
+Installed releases:
+
+| Release | Namespace | Notes |
+|---|---|---|
+| aws-load-balancer-controller | kube-system | IRSA role, Shield/WAF disabled, VPC id and region set explicitly because Fargate has no instance metadata |
+| keda | keda | Images from `mirror/kedacore/*` |
+| argocd | argocd | Dex and notifications disabled, `server.insecure=true` so the ALB terminates TLS |
+| prometheus | monitoring | No node-exporter, Alertmanager or Pushgateway (DaemonSets and PVCs do not fit Fargate). Retention 6h, no persistent volume. Pod CPU and memory come from kubelet cAdvisor through the API server proxy, replica counts from kube-state-metrics |
+| grafana | monitoring | Prometheus datasource and the `Lab-Commit` dashboard are provisioned from `dashboards/lab-commit.json` |
+
+Check:
+
+```bash
+kubectl get pods -A
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d; echo
+terraform output -raw grafana_admin_password; echo
+```
+
+Until the ALB ingress exists (stack 50) use port forwarding:
+
+```bash
+kubectl -n argocd port-forward svc/argocd-server 8080:80
+kubectl -n monitoring port-forward svc/grafana 3000:80
+```
+
+Fargate pods take one to two minutes to start, so the first apply can take about 10 minutes. If a release times out, run `terraform apply` again.
+
+The dashboard panels expect the `lab` namespace, deployments named `frontend` and `backend`, and an `http_requests_total` metric exposed by the frontend with Prometheus scrape annotations.
 
 ## Cost control
 

@@ -10,7 +10,7 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 | 10-network | VPC, 2 private subnets, endpoints, security groups | done |
 | 20-eks | Cluster 1.35, Fargate profiles, IRSA, ECR pull-through cache | done |
 | 30-platform | Load Balancer Controller, Argo CD, KEDA, Prometheus, Grafana | done |
-| 40-data | RDS PostgreSQL | todo |
+| 40-data | RDS PostgreSQL, database secret, backend IRSA role | done |
 | 50-edge | Self-signed cert in ACM, private Route53 zone | todo |
 | 60-windows | Windows instance via SSM | todo |
 | 70-pipeline | CodePipeline, CodeBuild, ECR | todo |
@@ -180,6 +180,55 @@ kubectl -n monitoring port-forward svc/grafana 3000:80
 Fargate pods take one to two minutes to start, so the first apply can take about 10 minutes. If a release times out, run `terraform apply` again.
 
 The dashboard panels expect the `lab` namespace, deployments named `frontend` and `backend`, and an `http_requests_total` metric exposed by the frontend with Prometheus scrape annotations.
+
+## Step 6: data
+
+Prerequisites: stacks 10 and 20 applied, because this stack reads their remote state (VPC, private subnets, cluster security group, OIDC provider).
+
+```bash
+cd terraform/40-data
+cp backend.hcl.example backend.hcl
+cp example.tfvars terraform.tfvars
+terraform init -backend-config=backend.hcl
+terraform plan
+terraform apply
+```
+
+RDS takes about 5 to 8 minutes to create.
+
+Result:
+
+- RDS PostgreSQL 18, `db.t4g.micro`, 20 GB gp3, encrypted, single AZ, in a DB subnet group over the two private subnets, `publicly_accessible = false`
+- Master password generated and stored by RDS in Secrets Manager (`manage_master_user_password`), never in Terraform state or tfvars
+- Security group `lab-commit-db` that allows port 5432 only from the EKS cluster security group. Fargate pods use that group, so pods can connect and nothing else in the VPC can
+- IAM role `lab-commit-backend` for the `lab/backend` service account (IRSA), allowed only `GetSecretValue` and `DescribeSecret` on the database secret. Pods reach Secrets Manager through the `secretsmanager` interface endpoint
+- No table is created here. The Helm chart runs a seed Job that creates `lab_values` and inserts the initial rows idempotently
+
+Outputs used by the chart:
+
+```bash
+terraform output -raw db_endpoint
+terraform output -raw db_secret_arn
+terraform output -raw backend_role_arn
+```
+
+Check:
+
+```bash
+aws rds describe-db-instances --db-instance-identifier lab-commit-db \
+  --query 'DBInstances[0].[DBInstanceStatus,PubliclyAccessible,StorageEncrypted,Engine,EngineVersion]'
+aws secretsmanager describe-secret --secret-id "$(terraform output -raw db_secret_arn)" --query Name
+```
+
+Expected: `available`, `false`, `true`, `postgres`, `18.x`, and a secret name starting with `rds!db-`.
+
+Troubleshooting:
+
+- `Error reading remote state`: `state_bucket` or `region` in `terraform.tfvars` does not match the bucket from stack 00, or stack 10 or 20 was not applied.
+- `InvalidParameterCombination` for the engine version: list the versions offered for the instance class and set `db_engine_version`:
+  `aws rds describe-orderable-db-instance-options --engine postgres --db-instance-class db.t4g.micro --query 'OrderableDBInstanceOptions[].EngineVersion'`
+- The backend logs `no pg_hba.conf entry ... no encryption`: PostgreSQL 18 on RDS enforces SSL (`rds.force_ssl = 1`). Keep `DB_SSLMODE=require` in the chart values.
+- `AccessDeniedException` on `GetSecretValue`: the service account is missing the `eks.amazonaws.com/role-arn` annotation, or its namespace or name differs from `backend_namespace` and `backend_service_account`.
 
 ## Cost control
 

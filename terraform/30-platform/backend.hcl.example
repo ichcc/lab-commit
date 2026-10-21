@@ -1,0 +1,5 @@
+bucket       = "lab-commit-tfstate-<account-id>-<region>"
+key          = "30-platform/terraform.tfstate"
+region       = "<region>"
+encrypt      = true
+use_lockfile = true

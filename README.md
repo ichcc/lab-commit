@@ -8,7 +8,7 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 |---|---|---|
 | 00-bootstrap | State bucket, budget alarms | done |
 | 10-network | VPC, 2 private subnets, endpoints, security groups | done |
-| 20-eks | Cluster 1.35, Fargate profiles, IRSA, ECR pull-through cache | todo |
+| 20-eks | Cluster 1.35, Fargate profiles, IRSA, ECR pull-through cache | done |
 | 30-platform | Load Balancer Controller, Argo CD, KEDA, Prometheus, Grafana | todo |
 | 40-data | RDS PostgreSQL | todo |
 | 50-edge | Self-signed cert in ACM, private Route53 zone | todo |
@@ -75,6 +75,49 @@ Result:
 - Security groups: endpoints (443 from VPC), ALB (80/443 from VPC), Windows (egress only to VPC and S3)
 
 Interface endpoints are the largest hourly cost in this stack. Remove entries from `interface_endpoints` that a later stack does not need.
+
+## Step 3: EKS
+
+```bash
+cd ../20-eks
+cp backend.hcl.example backend.hcl
+cp example.tfvars terraform.tfvars
+```
+
+Fill `backend.hcl` and `terraform.tfvars`. `admin_cidrs` must contain your current public IP as `x.x.x.x/32`, because Terraform and kubectl reach the API through the public endpoint during build.
+
+```bash
+terraform init -backend-config=backend.hcl
+terraform apply
+aws eks update-kubeconfig --name lab-commit-eks --region "$AWS_REGION"
+kubectl get pods -A
+```
+
+Result:
+
+- Cluster `lab-commit-eks`, Kubernetes 1.35, API authentication mode `API`, creator has admin
+- No node groups. One Fargate profile per namespace: `default`, `kube-system`, `argocd`, `keda`, `monitoring`, `lab`
+- CoreDNS addon configured to run on Fargate
+- OIDC provider for IRSA (EKS Pod Identity is not supported on Fargate)
+- ECR pull-through cache rules: `ecr-public/`, `k8s/`, `quay/`. Docker Hub and GHCR need registry credentials in Secrets Manager and are not configured
+- Cluster security group accepts the ALB security group on ports 80, 3000, 8000, 8080, 9090 only
+
+Image paths for later stacks follow this pattern:
+
+```
+<account>.dkr.ecr.<region>.amazonaws.com/quay/prometheus/prometheus:<tag>
+<account>.dkr.ecr.<region>.amazonaws.com/k8s/metrics-server/metrics-server:<tag>
+```
+
+The first pull of each image creates the cached repository.
+
+CoreDNS can stay in Pending for a few minutes after the Fargate profile is created. If it does not start:
+
+```bash
+kubectl -n kube-system rollout restart deployment coredns
+```
+
+To lock the API down at the end of the lab set `public_endpoint = false` and re-apply from a host inside the VPC.
 
 ## Cost control
 

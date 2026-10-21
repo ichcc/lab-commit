@@ -35,3 +35,13 @@ variable "interface_endpoints" {
     "kms",
   ]
 }
+
+variable "public_subnet_cidr" {
+  type    = string
+  default = "10.20.0.0/24"
+}
+
+variable "nat_instance_type" {
+  type    = string
+  default = "t4g.micro"
+}

@@ -1,0 +1,32 @@
+{{- if .Values.keda.enabled }}
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: frontend
+  labels:
+    {{- include "lab.labels" . | nindent 4 }}
+    {{- include "lab.selector" "frontend" | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: frontend
+  minReplicaCount: {{ .Values.keda.minReplicaCount }}
+  maxReplicaCount: {{ .Values.keda.maxReplicaCount }}
+  pollingInterval: {{ .Values.keda.pollingInterval }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  advanced:
+    horizontalPodAutoscalerConfig:
+      behavior:
+        scaleDown:
+          stabilizationWindowSeconds: {{ .Values.keda.scaleDownStabilizationSeconds }}
+          policies:
+            - type: Pods
+              value: 1
+              periodSeconds: 30
+  triggers:
+    - type: prometheus
+      metricType: AverageValue
+      metadata:
+        serverAddress: {{ .Values.keda.serverAddress }}
+        query: {{ .Values.keda.query | quote }}
+        threshold: {{ .Values.keda.threshold | quote }}
+{{- end }}

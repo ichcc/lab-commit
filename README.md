@@ -230,6 +230,91 @@ Troubleshooting:
 - The backend logs `no pg_hba.conf entry ... no encryption`: PostgreSQL 18 on RDS enforces SSL (`rds.force_ssl = 1`). Keep `DB_SSLMODE=require` in the chart values.
 - `AccessDeniedException` on `GetSecretValue`: the service account is missing the `eks.amazonaws.com/role-arn` annotation, or its namespace or name differs from `backend_namespace` and `backend_service_account`.
 
+## Step 7: applications and chart
+
+Two Flask services in `apps/`, packaged by the Helm chart `charts/lab`. Argo CD deploys the chart (stack 70 and `gitops/`). This step covers local tests and the chart values.
+
+| Service | Port | Endpoints | Notes |
+|---|---|---|---|
+| backend | 8000 | `GET /value`, `GET /healthz` | Reads the database password from Secrets Manager with boto3 through IRSA, returns the next row of `lab_values` in a loop. The loop position is the sequence `lab_values_cursor`, so all replicas share it |
+| frontend | 8080 | `GET /`, `GET /healthz`, `GET /metrics` | A background thread polls the backend every 5 seconds. `/` returns `Hello Lab-Commit <APP_VERSION> <value>`. `http_requests_total` counts only `/`, not health checks or scrapes |
+
+`seed.py` in the backend image creates `lab_values` and the sequence and inserts the initial rows only when the table is empty. The chart runs it as a Job.
+
+Prerequisites: Python 3.13, `uv` or `pip`, Docker, Helm 3.
+
+### Tests
+
+```bash
+cd apps/backend
+python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+PYTHONPATH=. .venv/bin/pytest -q tests
+
+cd ../frontend
+python3.13 -m venv .venv && .venv/bin/pip install -r requirements.txt -r requirements-dev.txt
+PYTHONPATH=. .venv/bin/pytest -q tests
+```
+
+Expected: `6 passed` for the backend and `5 passed` for the frontend.
+
+### Images
+
+Both Dockerfiles use `public.ecr.aws/docker/library/python:3.13-slim` and run as UID 10001. Fargate runs x86, so build for `linux/amd64`:
+
+```bash
+docker build --platform linux/amd64 -t lab/backend:v1.0.0 apps/backend
+docker build --platform linux/amd64 -t lab/frontend:v1.0.0 apps/frontend
+```
+
+Inside AWS, pass the pull-through cache path so the build does not need Docker Hub or the internet:
+
+```bash
+--build-arg BASE_IMAGE=<account>.dkr.ecr.<region>.amazonaws.com/ecr-public/docker/library/python:3.13-slim
+```
+
+The pipeline in stack 70 builds and pushes both images to the `lab/backend` and `lab/frontend` ECR repositories with the chart `appVersion` as the tag.
+
+### Chart
+
+| Object | Details |
+|---|---|
+| Deployments `frontend`, `backend` | Non-root, read-only root filesystem, requests 250m CPU and 512Mi (one Fargate 0.25 vCPU / 1 GB slot), `/healthz` probes. `APP_VERSION` comes from `.Chart.AppVersion`, and so does the image tag unless `image.tag` is set |
+| Services | ClusterIP only. The backend has no Ingress |
+| ServiceAccounts | `backend` carries the IRSA annotation `backend.roleArn`. `frontend` has no token mounted |
+| Job `seed` | Helm `post-install,post-upgrade` hook, which Argo CD runs as a PostSync hook. Uses the backend image and service account |
+| Ingress `frontend` | Internal ALB, `target-type: ip`, group `lab-commit`, ports 80 and 443 with redirect to 443, ACM certificate, host `lab-commit-task.<zone>` |
+| Ingresses `argocd`, `grafana` | Same ALB group, created in the `argocd` and `monitoring` namespaces, hosts `argocd.<zone>` and `grafana.<zone>` |
+| ScaledObject `frontend` | Prometheus trigger `sum(rate(http_requests_total{namespace="lab"}[1m]))`, `AverageValue` 10, 1 to 4 replicas, `cooldownPeriod` 60, scale-down stabilization 60 s and at most one pod every 30 s |
+
+Required values, taken from Terraform outputs:
+
+| Value | Source |
+|---|---|
+| `image.registry` | `terraform -chdir=terraform/20-eks output -raw ecr_registry` |
+| `backend.roleArn` | `terraform -chdir=terraform/40-data output -raw backend_role_arn` |
+| `db.host` | `terraform -chdir=terraform/40-data output -raw db_endpoint` |
+| `db.secretArn` | `terraform -chdir=terraform/40-data output -raw db_secret_arn` |
+| `ingress.certificateArn` | `terraform -chdir=terraform/50-edge output -raw certificate_arn` |
+| `ingress.securityGroupId` | `terraform -chdir=terraform/10-network output -raw alb_security_group_id` |
+| `zone` | private hosted zone name, default `lab.internal` |
+
+Render and lint:
+
+```bash
+helm lint charts/lab -f my-values.yaml
+helm template lab charts/lab -n lab -f my-values.yaml
+```
+
+Without the required values the render stops with a message such as `db.host is required`.
+
+Troubleshooting:
+
+- Pods stay `Pending`: the namespace has no Fargate profile, or the requests do not fit a Fargate size. `kubectl -n lab describe pod <pod>` shows the reason.
+- `ImagePullBackOff`: the images are not pushed yet, or the tag does not match `appVersion`. `aws ecr describe-images --repository-name lab/frontend`.
+- The page shows `n/a`: the backend is not ready or the seed Job has not finished. `kubectl -n lab logs deploy/backend` and `kubectl -n lab get jobs`.
+- All three Ingresses in one group must carry the same scheme, certificate and security group annotations, otherwise the controller rejects the group. `kubectl -n lab describe ingress frontend` shows the error event.
+- The ScaledObject is not `READY`: KEDA cannot reach Prometheus. `kubectl -n lab describe scaledobject frontend` and `kubectl -n keda logs deploy/keda-operator`. An empty query result before the first page request counts as 0 and is not an error.
+
 ## Cost control
 
 Destroy stacks in reverse order at the end of every session:

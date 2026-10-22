@@ -1,0 +1,31 @@
+{{- if .Values.platformIngress.enabled }}
+{{- range $index, $name := list "argocd" "grafana" }}
+{{- $app := index $.Values.platformIngress $name }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ $app.namespace }}
+  labels:
+    {{- include "lab.labels" $ | nindent 4 }}
+    {{- include "lab.selector" $name | nindent 4 }}
+  annotations:
+    {{- include "lab.albAnnotations" $ | nindent 4 }}
+    alb.ingress.kubernetes.io/group.order: {{ add 20 $index | quote }}
+    alb.ingress.kubernetes.io/healthcheck-path: {{ $app.healthcheckPath }}
+spec:
+  ingressClassName: {{ $.Values.ingress.className }}
+  rules:
+    - host: {{ printf "%s.%s" $app.host $.Values.zone }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $app.service }}
+                port:
+                  number: {{ $app.port }}
+{{- end }}
+{{- end }}

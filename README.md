@@ -12,7 +12,7 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 | 30-platform | Load Balancer Controller, Argo CD, KEDA, Prometheus, Grafana | done |
 | 40-data | RDS PostgreSQL, database secret, backend IRSA role | done |
 | 50-edge | Self-signed CA and certificate in ACM, private Route53 zone, ALB records | done |
-| 60-windows | Windows instance via SSM | todo |
+| 60-windows | Windows instance via SSM, Chrome from S3, lab CA trusted | done |
 | 70-pipeline | CodePipeline, CodeBuild, ECR | todo |
 
 ## Prerequisites
@@ -377,6 +377,104 @@ Troubleshooting:
 - `multiple LBs matched`: an older ALB with the same group tag is still being deleted. Wait and retry.
 - Names do not resolve from the Windows instance: the zone must be attached to the VPC (`aws route53 get-hosted-zone --id <zone>` shows `VPCs`), and the VPC needs DNS support and DNS hostnames, which stack 10 enables.
 - Destroy order: run `terraform apply -var alb_ready=false` or destroy this stack before the ALB is removed, otherwise the data source fails on the next plan.
+
+## Step 9: Windows test instance
+
+A Windows Server 2022 instance inside the VPC is the only client of the internal ALB. It has no public IP, no key pair and no inbound rules. Access goes through Systems Manager.
+
+Prerequisites: stacks 10 and 50 (phase one) applied, because this stack reads the Windows security group and the CA parameter from their state. AWS CLI with the Session Manager plugin on your workstation for port forwarding.
+
+The stack creates:
+
+- `t3.medium` from the latest `Windows_Server-2022-English-Full-Base` AMI, in the first private subnet, security group `lab-commit-windows` from stack 10, IMDSv2 required, 50 GB encrypted gp3 root volume
+- Instance profile with `AmazonSSMManagedInstanceCore`, read access to the installers bucket, and `ssm:GetParameter` on the CA certificate and the Administrator password parameters
+- Private S3 bucket `lab-commit-installers-<account>-<region>` for the Chrome installer
+- A random Administrator password in SSM Parameter Store (`/lab-commit/windows-admin-password`, SecureString)
+- SSM document `lab-commit-windows-setup` and an association that runs it on the instance: set the Administrator password, run `scripts/trust-cert.ps1` (imports the lab CA into `LocalMachine\Root`), install Chrome from S3
+
+Chrome comes from S3, not from the internet. The Windows security group allows only HTTPS to the VPC (SSM endpoints, ALB) and to the S3 prefix list (gateway endpoint), plus DNS and HTTP inside the VPC. There is no route to the internet for this instance, which is also what makes the "not reachable from the Internet" check meaningful.
+
+### Stage the Chrome installer
+
+Run once from your workstation, which has internet access:
+
+```bash
+cd terraform/60-windows
+cp backend.hcl.example backend.hcl
+cp example.tfvars terraform.tfvars
+terraform init -backend-config=backend.hcl
+terraform apply -target=aws_s3_bucket.installers
+../../scripts/stage-chrome.sh "$(terraform output -raw installers_bucket)" "$AWS_REGION"
+terraform apply
+```
+
+The script downloads the Chrome Enterprise 64-bit MSI from Google, checks the file signature and uploads it to `s3://<bucket>/chrome/googlechromestandaloneenterprise64.msi`.
+
+### Check the setup
+
+The instance needs about 5 minutes to boot and register with SSM.
+
+```bash
+INSTANCE_ID=$(terraform output -raw instance_id)
+aws ssm describe-instance-information --filters Key=InstanceIds,Values="$INSTANCE_ID" \
+  --query 'InstanceInformationList[0].[PingStatus,PlatformName]'
+aws ssm describe-association-executions --association-id "$(terraform output -raw association_id)" \
+  --query 'AssociationExecutions[0].[Status,DetailedStatus]'
+aws ec2 describe-instances --instance-ids "$INSTANCE_ID" \
+  --query 'Reservations[0].Instances[0].[PublicIpAddress,MetadataOptions.HttpTokens,KeyName]'
+```
+
+Expected: `Online`, `Microsoft Windows Server 2022 Datacenter`, association `Success`, and `None`, `required`, `None`.
+
+### Connect with Fleet Manager
+
+1. Read the password: `aws ssm get-parameter --name /lab-commit/windows-admin-password --with-decryption --query Parameter.Value --output text`
+2. Console: Systems Manager, Fleet Manager, select the instance, Node actions, Connect with Remote Desktop.
+3. Authentication type "User credentials", user `Administrator`, the password from step 1.
+
+### Connect with port forwarding
+
+```bash
+aws ssm start-session --target "$INSTANCE_ID" \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters portNumber=3389,localPortNumber=13389
+```
+
+Then connect an RDP client to `localhost:13389` as `Administrator`. Windows App on macOS or `mstsc` on Windows work.
+
+### Browse
+
+In Chrome on the instance:
+
+- `https://lab-commit-task.lab.internal` shows `Hello Lab-Commit v1.0.0 <value>`, the value changes about every 5 seconds on refresh
+- `https://argocd.lab.internal` opens Argo CD (user `admin`, password from `argocd-initial-admin-secret`)
+- `https://grafana.lab.internal` opens Grafana (user `admin`, password from `terraform -chdir=terraform/30-platform output -raw grafana_admin_password`)
+
+The padlock shows a valid connection: the certificate is issued by `lab-commit lab CA`, which the setup imported. `http://` redirects to `https://`.
+
+To run the trust script again by hand, in an elevated PowerShell on the instance: `.\trust-cert.ps1` (reads the CA from SSM) or `.\trust-cert.ps1 -PemPath C:\path\ca.pem`.
+
+### Not reachable from the Internet
+
+From your workstation:
+
+```bash
+dig +short lab-commit-task.lab.internal
+aws elbv2 describe-load-balancers --query "LoadBalancers[?starts_with(LoadBalancerName, 'k8s-labcommit')].[Scheme,DNSName]"
+curl -sk --max-time 10 "https://$(aws elbv2 describe-load-balancers --query "LoadBalancers[?starts_with(LoadBalancerName, 'k8s-labcommit')].DNSName" --output text)" || echo "unreachable"
+```
+
+Expected: no answer from public DNS for the private zone, scheme `internal`, and the curl times out because the ALB DNS name resolves to private VPC addresses.
+
+Troubleshooting:
+
+- Instance not `Online` in SSM: the `ssm`, `ssmmessages` and `ec2messages` endpoints must exist in stack 10, and the Windows security group must allow HTTPS to the VPC. Check the instance console screenshot in EC2.
+- Association `Failed` at `installChrome`: the MSI is not staged. Stage it, then `aws ssm start-associations-once --association-ids <id>`.
+- Chrome shows `NET::ERR_CERT_AUTHORITY_INVALID`: the trust step did not run or the certificate was recreated. Run `trust-cert.ps1` again and restart Chrome.
+- Name does not resolve: phase two of stack 50 has not been applied, or the private zone is not attached to the VPC.
+- Fleet Manager says the password is wrong: the association has not finished the first step yet. Check the association execution.
+
+Cost: about 0.07 USD per hour while running, including the Windows licence. Stop the instance between sessions: `aws ec2 stop-instances --instance-ids "$INSTANCE_ID"`.
 
 ## Cost control
 

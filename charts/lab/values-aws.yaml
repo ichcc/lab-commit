@@ -1,0 +1,11 @@
+image:
+  registry: 788717064995.dkr.ecr.il-central-1.amazonaws.com
+zone: lab.internal
+backend:
+  roleArn: arn:aws:iam::788717064995:role/lab-commit-il-central-1-backend
+db:
+  host: lab-commit-db.clsagma8yfi1.il-central-1.rds.amazonaws.com
+  secretArn: arn:aws:secretsmanager:il-central-1:788717064995:secret:rds!db-7104fe27-780d-4952-be99-75cbcf5dba2d-Xq18Ff
+ingress:
+  certificateArn: arn:aws:acm:il-central-1:788717064995:certificate/417708e9-4f44-462b-98b2-30f05a25eb3c
+  securityGroupId: sg-03186ef5387afadd8

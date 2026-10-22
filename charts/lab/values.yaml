@@ -1,0 +1,82 @@
+image:
+  registry: ""
+  tag: ""
+  pullPolicy: IfNotPresent
+
+zone: lab.internal
+
+frontend:
+  repository: lab/frontend
+  replicas: 1
+  port: 8080
+  pollSeconds: 5
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 512Mi
+
+backend:
+  repository: lab/backend
+  replicas: 1
+  port: 8000
+  roleArn: ""
+  serviceAccountName: backend
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 512Mi
+
+db:
+  host: ""
+  port: 5432
+  name: lab
+  secretArn: ""
+  sslmode: require
+
+seed:
+  enabled: true
+  values: "7,13,21,42,64,99"
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      memory: 512Mi
+
+ingress:
+  enabled: true
+  className: alb
+  groupName: lab-commit
+  certificateArn: ""
+  securityGroupId: ""
+  host: lab-commit-task
+
+platformIngress:
+  enabled: true
+  argocd:
+    host: argocd
+    namespace: argocd
+    service: argocd-server
+    port: 80
+    healthcheckPath: /healthz
+  grafana:
+    host: grafana
+    namespace: monitoring
+    service: grafana
+    port: 80
+    healthcheckPath: /api/health
+
+keda:
+  enabled: true
+  serverAddress: http://prometheus-server.monitoring.svc.cluster.local
+  query: sum(rate(http_requests_total{namespace="lab"}[1m]))
+  threshold: "10"
+  minReplicaCount: 1
+  maxReplicaCount: 4
+  pollingInterval: 15
+  cooldownPeriod: 60
+  scaleDownStabilizationSeconds: 60

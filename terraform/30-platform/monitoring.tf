@@ -25,6 +25,7 @@ resource "helm_release" "prometheus" {
     }
     server = {
       image            = { repository = "${local.ecr}/quay/prometheus/prometheus" }
+      global           = { scrape_interval = "15s", evaluation_interval = "15s" }
       retention        = "6h"
       persistentVolume = { enabled = false }
       resources        = { requests = { cpu = "500m", memory = "1Gi" } }

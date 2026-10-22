@@ -1,0 +1,52 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: k6-load
+  namespace: lab
+  labels:
+    app.kubernetes.io/name: k6-load
+    app.kubernetes.io/part-of: lab-commit
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 1800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: k6-load
+        app.kubernetes.io/part-of: lab-commit
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 12345
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: k6
+          image: K6_IMAGE
+          args: ["run", "--no-usage-report", "/scripts/script.js"]
+          env:
+            - name: TARGET_URL
+              value: TARGET_URL_VALUE
+            - name: TARGET_RPS
+              value: "40"
+          resources:
+            requests:
+              cpu: "1"
+              memory: 2Gi
+            limits:
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+      volumes:
+        - name: script
+          configMap:
+            name: k6-script

@@ -476,6 +476,74 @@ Troubleshooting:
 
 Cost: about 0.07 USD per hour while running, including the Windows licence. Stop the instance between sessions: `aws ec2 stop-instances --instance-ids "$INSTANCE_ID"`.
 
+## Step 11: load test and autoscaling
+
+A k6 Job inside the cluster sends HTTPS requests to `https://lab-commit-task.<zone>/` through the internal ALB, the same path the Windows browser uses. KEDA scales the frontend from the request rate.
+
+Prerequisites: the application synced and reachable (steps 8 and 10), the k6 image mirrored, `kubectl` pointed at the cluster.
+
+### Mirror the k6 image
+
+k6 is on Docker Hub, which the pull-through cache does not serve. `scripts/mirror-images.txt` lists `docker.io/grafana/k6:2.3.0`, so run the mirror script again if you ran it before this line existed:
+
+```bash
+./scripts/mirror-images.sh "$AWS_REGION"
+aws ecr describe-images --repository-name mirror/grafana/k6 --query 'imageDetails[].imageTags'
+```
+
+### Run
+
+```bash
+./scripts/run-loadgen.sh "$AWS_REGION" lab.internal
+```
+
+The script loads `loadgen/script.js` into the ConfigMap `k6-script`, deletes a previous `k6-load` Job and starts a new one in the `lab` namespace (Fargate, 1 vCPU, 2 GB). The profile:
+
+| Phase | Duration | Requests per second |
+|---|---|---|
+| Ramp up | 2 min | 1 to 40 |
+| Hold | 6 min | 40 |
+| Ramp down | 1 min | 40 to 0 |
+
+TLS verification is skipped (`insecureSkipTLSVerify`) because the pod does not trust the lab CA. Override the target or rate by editing `TARGET_URL` and `TARGET_RPS` in `loadgen/job.yaml`, or the stage lengths with `RAMP_UP`, `HOLD`, `RAMP_DOWN`.
+
+### How scaling works
+
+KEDA polls Prometheus every 15 seconds with `sum(rate(http_requests_total{namespace="lab"}[1m]))` and feeds the HPA an `AverageValue` target of 10 requests per second per pod. At 40 requests per second the HPA wants 4 pods, which is also `maxReplicaCount`.
+
+Scale-down from 4 to 1 is driven by the HPA behavior in the ScaledObject: a 60 second stabilization window and at most one pod removed every 30 seconds. `cooldownPeriod: 60` is set as the task asks, but KEDA applies it only when scaling to zero, and `minReplicaCount` is 1.
+
+Expected timeline:
+
+| Time from start | Frontend pods |
+|---|---|
+| 0 to 1 min | 1 |
+| 1 to 3 min | 2, 3, then 4 (new Fargate pods need 40 to 90 seconds to become Ready) |
+| 3 to 8 min | 4 |
+| 9 to 10 min | rate window drains |
+| about 10 to 13 min | 3, 2, then 1 |
+
+### Watch
+
+```bash
+kubectl -n lab get pods -l app.kubernetes.io/name=frontend -w
+kubectl -n lab get hpa -w
+kubectl -n lab get scaledobject frontend
+kubectl -n lab logs -f job/k6-load
+```
+
+In Grafana (`https://grafana.lab.internal` from the Windows instance, or `kubectl -n monitoring port-forward svc/grafana 3000:80`), open the `Lab-Commit` dashboard: the request rate panel climbs to about 40 per second, the frontend replica panel steps from 1 to 4 and back, and the CPU and memory panels show one line per pod.
+
+At the end k6 prints a summary. Expected: `http_req_failed` below 5 percent and both checks above 95 percent. A few failures during scale-up are normal while new pods register with the ALB.
+
+Troubleshooting:
+
+- Job pod `ImagePullBackOff`: the k6 image is not mirrored. Run the mirror script.
+- k6 reports `lookup lab-commit-task.lab.internal: no such host`: phase two of stack 50 (DNS records) is not applied.
+- Requests time out: the ALB security group must allow 443 from the VPC CIDR, which stack 10 configures.
+- Pods do not go above 1: `kubectl -n lab describe hpa` shows the metric value. If it stays at 0, Prometheus is not scraping the frontend: check the `prometheus.io/*` annotations on the pods and the `kubernetes-pods` target in Prometheus.
+- Pods stay `Pending` during scale-up: Fargate capacity is provisioning. Wait, or check events with `kubectl -n lab get events --sort-by=.lastTimestamp`.
+
 ## Cost control
 
 Destroy stacks in reverse order at the end of every session:

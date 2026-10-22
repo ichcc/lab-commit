@@ -10,7 +10,7 @@ data "aws_iam_policy_document" "assume" {
 }
 
 resource "aws_iam_role" "windows" {
-  name               = "${var.project}-windows"
+  name               = "${var.project}-${var.region}-windows"
   assume_role_policy = data.aws_iam_policy_document.assume.json
 }
 
@@ -41,6 +41,6 @@ resource "aws_iam_role_policy" "setup" {
 }
 
 resource "aws_iam_instance_profile" "windows" {
-  name = "${var.project}-windows"
+  name = "${var.project}-${var.region}-windows"
   role = aws_iam_role.windows.name
 }

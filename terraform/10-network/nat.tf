@@ -38,7 +38,7 @@ resource "aws_route_table_association" "public" {
 module "fck_nat" {
   source = "git::https://github.com/RaJiska/terraform-aws-fck-nat.git?ref=v1.6.1"
 
-  name          = "${var.project}-nat"
+  name          = "${var.project}-${var.region}-nat"
   vpc_id        = aws_vpc.this.id
   subnet_id     = aws_subnet.public.id
   instance_type = var.nat_instance_type

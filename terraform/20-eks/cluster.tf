@@ -10,7 +10,7 @@ data "aws_iam_policy_document" "eks_assume" {
 }
 
 resource "aws_iam_role" "cluster" {
-  name               = "${local.cluster_name}-cluster"
+  name               = "${var.project}-${var.region}-eks-cluster"
   assume_role_policy = data.aws_iam_policy_document.eks_assume.json
 }
 

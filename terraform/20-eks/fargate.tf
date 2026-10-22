@@ -16,7 +16,7 @@ data "aws_iam_policy_document" "fargate_assume" {
 }
 
 resource "aws_iam_role" "fargate" {
-  name               = "${local.cluster_name}-fargate"
+  name               = "${var.project}-${var.region}-eks-fargate"
   assume_role_policy = data.aws_iam_policy_document.fargate_assume.json
 }
 

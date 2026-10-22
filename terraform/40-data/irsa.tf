@@ -22,7 +22,7 @@ data "aws_iam_policy_document" "backend_assume" {
 }
 
 resource "aws_iam_role" "backend" {
-  name               = "${var.project}-backend"
+  name               = "${var.project}-${var.region}-backend"
   assume_role_policy = data.aws_iam_policy_document.backend_assume.json
 }
 

@@ -22,12 +22,12 @@ data "aws_iam_policy_document" "lbc_assume" {
 }
 
 resource "aws_iam_role" "lbc" {
-  name               = "${var.project}-lbc"
+  name               = "${var.project}-${var.region}-lbc"
   assume_role_policy = data.aws_iam_policy_document.lbc_assume.json
 }
 
 resource "aws_iam_policy" "lbc" {
-  name   = "${var.project}-lbc"
+  name   = "${var.project}-${var.region}-lbc"
   policy = file("${path.module}/lbc-iam-policy.json")
 }
 

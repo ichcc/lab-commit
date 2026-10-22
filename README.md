@@ -221,7 +221,7 @@ Result:
 - RDS PostgreSQL 18, `db.t4g.micro`, 20 GB gp3, encrypted, single AZ, in a DB subnet group over the two private subnets, `publicly_accessible = false`
 - Master password generated and stored by RDS in Secrets Manager (`manage_master_user_password`), never in Terraform state or tfvars
 - Security group `lab-commit-db` that allows port 5432 only from the EKS cluster security group. Fargate pods use that group, so pods can connect and nothing else in the VPC can
-- IAM role `lab-commit-backend` for the `lab/backend` service account (IRSA), allowed only `GetSecretValue` and `DescribeSecret` on the database secret. Pods reach Secrets Manager through the `secretsmanager` interface endpoint
+- IAM role `lab-commit-il-central-1-backend` for the `lab/backend` service account (IRSA), allowed only `GetSecretValue` and `DescribeSecret` on the database secret. Pods reach Secrets Manager through the `secretsmanager` interface endpoint
 - No table is created here. The Helm chart runs a seed Job that creates `lab_values` and inserts the initial rows idempotently
 
 Outputs used by the chart:
@@ -698,7 +698,7 @@ Run from the workstation unless the line says Windows. `export AWS_REGION=il-cen
 | Value changes every 5 seconds | Windows PowerShell: `1..6 \| % { (Invoke-WebRequest https://lab-commit-task.lab.internal).Content; Start-Sleep 5 }` | a different value on most lines |
 | Database is private | `aws rds describe-db-instances --db-instance-identifier lab-commit-db --query 'DBInstances[0].[PubliclyAccessible,DBSubnetGroup.Subnets[].SubnetIdentifier]'` | `false`, the two private subnets |
 | Only pods can connect | `aws ec2 describe-security-group-rules --filters Name=group-id,Values="$(terraform -chdir=terraform/40-data output -raw db_security_group_id)" --query 'SecurityGroupRules[?!IsEgress].[FromPort,ReferencedGroupInfo.GroupId]'` | `5432` from the cluster security group only |
-| Only the backend reads the secret | `aws iam get-role --role-name lab-commit-backend --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'` | `system:serviceaccount:lab:backend` |
+| Only the backend reads the secret | `aws iam get-role --role-name lab-commit-il-central-1-backend --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'` | `system:serviceaccount:lab:backend` |
 | No node groups | `aws eks list-nodegroups --cluster-name lab-commit-eks` | `"nodegroups": []` |
 | Fargate only | `kubectl get nodes -o wide` | every node name starts with `fargate-` |
 | Cluster version | `aws eks describe-cluster --name lab-commit-eks --query cluster.version` | `"1.35"` |

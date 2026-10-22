@@ -20,8 +20,11 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project   = var.project
-      ManagedBy = "terraform"
+      Project    = var.project
+      ManagedBy  = "terraform"
+      Owner      = "candidate02"
+      Repository = "github.com/ichcc/lab-commit"
+      Stack      = "60-windows"
     }
   }
 }

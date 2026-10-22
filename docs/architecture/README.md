@@ -1,6 +1,6 @@
 # Interactive AWS architecture
 
-Open `index.html` directly in a modern browser. It is a standalone, offline HTML file with no server, package installation or AWS credentials required.
+Open it on GitHub Pages: https://ichcc.github.io/lab-commit/docs/architecture/. `index.html` is a standalone HTML file, so it also works when opened directly in a modern browser, with no server, package installation or AWS credentials required. Only the JetBrains Mono web font is loaded from Google Fonts.
 
 Choose **Runtime**, **CI/CD**, or **Observability-Scaling** in the chapter rail. Use the viewer's zoom and pan controls, search for a component, and select a node to inspect its relationships and source references. Choose **Live** for animated traces and **Still** to stop them. Reduced-motion preferences are respected. Light/dark themes and SVG/raster export are available in the viewer.
 

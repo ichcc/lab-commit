@@ -17,14 +17,14 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 
 ## Architecture
 
-<a href="docs/architecture/index.html">
+<a href="https://ichcc.github.io/lab-commit/docs/architecture/">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/architecture/architecture-dark.png">
     <img alt="Lab-Commit AWS architecture: Windows over SSM reaches the internal ALB, frontend and backend on EKS Fargate, RDS PostgreSQL, KEDA scaling from Prometheus, CodeBuild pushing to ECR, Argo CD polling GitHub" src="docs/architecture/architecture-light.png">
   </picture>
 </a>
 
-[Open the interactive architecture](docs/architecture/index.html): Runtime, CI/CD and Observability-Scaling views with animated connections, zoom and pan, search and source references. GitHub shows the HTML as source, so download it and open it locally. See [viewer usage and evidence](docs/architecture/README.md).
+[Open the interactive architecture](https://ichcc.github.io/lab-commit/docs/architecture/): Runtime, CI/CD and Observability-Scaling views with animated connections, zoom and pan, search and source references. It is served by GitHub Pages from `docs/architecture/index.html`. See [viewer usage and evidence](docs/architecture/README.md).
 
 Everything runs in private subnets. The only path to the application is from inside the VPC: the Windows instance resolves `*.lab.internal` in the private zone and reaches the internal ALB over HTTPS. Pods pull images from ECR and call AWS APIs through interface endpoints. The fck-nat instance gives private subnets outbound access to GitHub, Docker Hub and GHCR.
 

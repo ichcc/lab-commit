@@ -1,0 +1,442 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Lab-Commit · AWS Infrastructure",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "animation": "trace",
+    "viewBox": [
+      1350,
+      715
+    ],
+    "repository": {
+      "url": "https://github.com/ichcc/lab-commit",
+      "revision": "62e00e4ee6119a393a9d793eea748061912af11c"
+    },
+    "views": [
+      {
+        "id": "runtime",
+        "label": "Runtime",
+        "focus": [
+          "windows",
+          "alb",
+          "frontend",
+          "backend",
+          "rds"
+        ],
+        "note": "Private HTTPS entry, frontend polling and PostgreSQL access."
+      },
+      {
+        "id": "cicd",
+        "label": "CI/CD",
+        "focus": [
+          "github",
+          "codebuild",
+          "ecr",
+          "argocd"
+        ],
+        "note": "Webhook builds immutable VERSION images; Argo CD syncs the chart."
+      },
+      {
+        "id": "observability",
+        "label": "Observability-Scaling",
+        "focus": [
+          "frontend",
+          "prometheus",
+          "keda",
+          "grafana"
+        ],
+        "note": "Prometheus supplies request rate to KEDA and dashboards to Grafana."
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "windows",
+      "type": "cloud",
+      "label": "Windows / SSM",
+      "sublabel": "Private access · trusted lab CA",
+      "pos": [
+        70,
+        115
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "terraform/60-windows/instance.tf"
+        }
+      ]
+    },
+    {
+      "id": "alb",
+      "type": "cloud",
+      "label": "Internal ALB",
+      "sublabel": "HTTPS 443 · ACM certificate",
+      "pos": [
+        330,
+        115
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "charts/lab/templates/ingress.yaml"
+        }
+      ]
+    },
+    {
+      "id": "frontend",
+      "type": "frontend",
+      "label": "Frontend",
+      "sublabel": "Flask :8080 · namespace lab",
+      "pos": [
+        590,
+        115
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "charts/lab/templates/frontend.yaml"
+        }
+      ]
+    },
+    {
+      "id": "backend",
+      "type": "backend",
+      "label": "Backend",
+      "sublabel": "Flask :8000 · IRSA secret access",
+      "pos": [
+        850,
+        115
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "charts/lab/templates/backend.yaml"
+        }
+      ]
+    },
+    {
+      "id": "rds",
+      "type": "database",
+      "label": "RDS PostgreSQL",
+      "sublabel": "Encrypted · single AZ · :5432",
+      "pos": [
+        1110,
+        115
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "terraform/40-data/rds.tf"
+        }
+      ]
+    },
+    {
+      "id": "github",
+      "type": "external",
+      "label": "GitHub",
+      "sublabel": "VERSION / apps/ · main",
+      "pos": [
+        590,
+        615
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "gitops/apps/lab.yaml"
+        }
+      ]
+    },
+    {
+      "id": "codebuild",
+      "type": "cloud",
+      "label": "CodeBuild",
+      "sublabel": "Private subnets · linux/amd64",
+      "pos": [
+        1110,
+        375
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "terraform/70-pipeline/codebuild.tf"
+        }
+      ]
+    },
+    {
+      "id": "ecr",
+      "type": "cloud",
+      "label": "ECR",
+      "sublabel": "lab/frontend · lab/backend",
+      "pos": [
+        1110,
+        495
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "terraform/70-pipeline/ecr.tf"
+        }
+      ]
+    },
+    {
+      "id": "argocd",
+      "type": "backend",
+      "label": "Argo CD",
+      "sublabel": "charts/lab · prune / selfHeal",
+      "pos": [
+        590,
+        375
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "gitops/apps/lab.yaml"
+        }
+      ]
+    },
+    {
+      "id": "prometheus",
+      "type": "backend",
+      "label": "Prometheus",
+      "sublabel": "15s scrape · 6h retention",
+      "pos": [
+        850,
+        245
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "terraform/30-platform/monitoring.tf"
+        }
+      ]
+    },
+    {
+      "id": "keda",
+      "type": "backend",
+      "label": "KEDA",
+      "sublabel": "Frontend · 1–4 replicas",
+      "pos": [
+        590,
+        245
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "charts/lab/templates/scaledobject.yaml"
+        }
+      ]
+    },
+    {
+      "id": "grafana",
+      "type": "frontend",
+      "label": "Grafana",
+      "sublabel": "Provisioned Lab-Commit dashboard",
+      "pos": [
+        850,
+        375
+      ],
+      "size": [
+        180,
+        74
+      ],
+      "sources": [
+        {
+          "path": "terraform/30-platform/monitoring.tf"
+        }
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "AWS il-central-1",
+      "wraps": [
+        "windows",
+        "alb",
+        "frontend",
+        "backend",
+        "rds",
+        "keda",
+        "prometheus",
+        "argocd",
+        "grafana",
+        "codebuild",
+        "ecr"
+      ],
+      "pad": 46
+    },
+    {
+      "kind": "security-group",
+      "label": "VPC 10.20.0.0/16 · private subnets across 2 AZs",
+      "wraps": [
+        "windows",
+        "alb",
+        "frontend",
+        "backend",
+        "rds",
+        "keda",
+        "prometheus",
+        "argocd",
+        "grafana",
+        "codebuild"
+      ],
+      "pad": 30
+    },
+    {
+      "kind": "security-group",
+      "label": "EKS Fargate · lab, argocd, monitoring, keda",
+      "wraps": [
+        "frontend",
+        "backend",
+        "keda",
+        "prometheus",
+        "argocd",
+        "grafana"
+      ],
+      "pad": 14
+    }
+  ],
+  "connections": [
+    {
+      "id": "windows-alb",
+      "from": "windows",
+      "to": "alb",
+      "label": "HTTPS"
+    },
+    {
+      "id": "alb-frontend",
+      "from": "alb",
+      "to": "frontend",
+      "label": "HTTP :8080"
+    },
+    {
+      "id": "frontend-backend",
+      "from": "frontend",
+      "to": "backend",
+      "label": "GET /value"
+    },
+    {
+      "id": "backend-rds",
+      "from": "backend",
+      "to": "rds",
+      "label": "TLS :5432"
+    },
+    {
+      "id": "github-codebuild",
+      "from": "github",
+      "to": "codebuild",
+      "label": "push webhook",
+      "labelAt": [
+        1086,
+        583
+      ]
+    },
+    {
+      "id": "codebuild-ecr",
+      "from": "codebuild",
+      "to": "ecr",
+      "label": "push VERSION",
+      "labelAt": [
+        1200,
+        463
+      ]
+    },
+    {
+      "id": "argocd-github",
+      "from": "argocd",
+      "to": "github",
+      "label": "poll chart",
+      "labelAt": [
+        680,
+        463
+      ]
+    },
+    {
+      "id": "grafana-prometheus",
+      "from": "grafana",
+      "to": "prometheus",
+      "label": "PromQL"
+    },
+    {
+      "id": "keda-prometheus",
+      "from": "keda",
+      "to": "prometheus",
+      "label": "request rate"
+    },
+    {
+      "id": "prometheus-frontend",
+      "from": "prometheus",
+      "to": "frontend",
+      "label": "scrape /metrics",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "keda-frontend",
+      "from": "keda",
+      "to": "frontend",
+      "label": "scale 1–4"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Private runtime",
+      "items": [
+        "Route53 lab.internal aliases → internal ALB (alb_ready=true). ACM terminates TLS; ALB also routes Argo CD and Grafana.",
+        "Frontend polls GET /value every 5s. Seed PostSync Job initializes RDS. Backend reads the RDS-managed secret using IRSA."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Network & delivery",
+      "items": [
+        "Public subnet: fck-nat t4g.micro + internet gateway. Private outbound GitHub traffic uses NAT; AWS APIs use interface endpoints and S3 gateway.",
+        "CodeBuild requires github_token_ready. Release updates Chart.yaml with [skip ci]; ECR cache/mirrors serve platform images."
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "Configuration, not live status",
+      "items": [
+        "Sources: Terraform 10–70, Helm charts/lab, pipeline/buildspec.yml, gitops/ and README.",
+        "Logical groupings are not subnet placement for managed AWS services. EKS API public access is configurable; RDS remains private and single AZ."
+      ]
+    }
+  ]
+}

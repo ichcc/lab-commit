@@ -1,0 +1,30 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/ichcc/Projects/personal/comit/docs/architecture/architecture.json",
+  "output": "/Users/ichcc/Projects/personal/comit/docs/architecture/index.html",
+  "specification": {
+    "sha256": "c08517186da192b70d98fea35cd9ff897cbefdc21635bbb03e5d928a34138d87",
+    "bytes": 8870
+  },
+  "artifact": {
+    "sha256": "bdbd7deeaef3cdaa55c2577b4e2643c1ca7a31f5ae0dec5f41ed0d5dadeb1a43",
+    "bytes": 724953
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  },
+  "evidence": {
+    "verified": true,
+    "repository": "https://github.com/ichcc/lab-commit",
+    "revision": "62e00e4ee6119a393a9d793eea748061912af11c",
+    "references": 12
+  }
+}

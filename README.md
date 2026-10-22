@@ -35,6 +35,26 @@ aws sts get-caller-identity
 
 Expected: `ENABLED`, an addon name, and your account id.
 
+## Apply order
+
+| Order | What | Notes |
+|---|---|---|
+| 0 | `scripts/delete-default-vpc.sh` | No-op in `il-central-1`, which has no default VPC in this account |
+| 1 | `terraform/00-bootstrap` | Local state, creates the state bucket |
+| 2 | `terraform/10-network` | |
+| 3 | `terraform/20-eks` | Then `aws eks update-kubeconfig` |
+| 4 | `scripts/mirror-images.sh` | KEDA, Grafana and k6 images |
+| 5 | `terraform/30-platform` | |
+| 6 | `terraform/40-data` | |
+| 7 | Tests and chart check | Local only |
+| 8 | `terraform/50-edge`, phase one | Certificate and zone |
+| 9 | `terraform/60-windows` | Stage the Chrome installer first |
+| 10 | GitHub repository, `terraform/70-pipeline`, first build, `scripts/render-values.sh`, `kubectl apply -f gitops/root.yaml` | Argo CD creates the ALB |
+| 10a | `terraform/50-edge`, phase two | `alb_ready=true` |
+| 11 | `scripts/run-loadgen.sh` | Autoscaling demo |
+
+A full build from an empty account takes about 60 to 75 minutes, most of it EKS, RDS and the first Fargate pods.
+
 ## Step 0: remove the default VPC
 
 ```bash
@@ -664,13 +684,61 @@ Troubleshooting:
 - Pods do not go above 1: `kubectl -n lab describe hpa` shows the metric value. If it stays at 0, Prometheus is not scraping the frontend: check the `prometheus.io/*` annotations on the pods and the `kubernetes-pods` target in Prometheus.
 - Pods stay `Pending` during scale-up: Fargate capacity is provisioning. Wait, or check events with `kubectl -n lab get events --sort-by=.lastTimestamp`.
 
-## Cost control
+## Verification checklist
 
-Destroy stacks in reverse order at the end of every session:
+Run from the workstation unless the line says Windows. `export AWS_REGION=il-central-1` first.
+
+| Check | Command | Expected |
+|---|---|---|
+| Unreachable from the Internet | `aws elbv2 describe-load-balancers --query "LoadBalancers[?starts_with(LoadBalancerName, 'k8s-labcommit')].Scheme"` and `curl -sk --max-time 10 https://<alb-dns-name>` | `internal`; curl times out |
+| Reachable over HTTPS from Windows | Chrome on Windows: `https://lab-commit-task.lab.internal` | `Hello Lab-Commit v1.0.0 <value>`, padlock without warning |
+| HTTP redirects to HTTPS | Windows PowerShell: `(Invoke-WebRequest http://lab-commit-task.lab.internal -MaximumRedirection 0 -ErrorAction SilentlyContinue).StatusCode` | `301` |
+| Certificate is the imported one | `aws acm describe-certificate --certificate-arn "$(terraform -chdir=terraform/50-edge output -raw certificate_arn)" --query 'Certificate.[Type,InUseBy]'` | `IMPORTED`, in use by the ALB |
+| Certificate served by the ALB | Windows PowerShell: `$t = [Net.Sockets.TcpClient]::new('lab-commit-task.lab.internal', 443); $s = [Net.Security.SslStream]::new($t.GetStream()); $s.AuthenticateAsClient('lab-commit-task.lab.internal'); $s.RemoteCertificate.Issuer` | `O=lab-commit, CN=lab-commit lab CA` |
+| Value changes every 5 seconds | Windows PowerShell: `1..6 \| % { (Invoke-WebRequest https://lab-commit-task.lab.internal).Content; Start-Sleep 5 }` | a different value on most lines |
+| Database is private | `aws rds describe-db-instances --db-instance-identifier lab-commit-db --query 'DBInstances[0].[PubliclyAccessible,DBSubnetGroup.Subnets[].SubnetIdentifier]'` | `false`, the two private subnets |
+| Only pods can connect | `aws ec2 describe-security-group-rules --filters Name=group-id,Values="$(terraform -chdir=terraform/40-data output -raw db_security_group_id)" --query 'SecurityGroupRules[?!IsEgress].[FromPort,ReferencedGroupInfo.GroupId]'` | `5432` from the cluster security group only |
+| Only the backend reads the secret | `aws iam get-role --role-name lab-commit-backend --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'` | `system:serviceaccount:lab:backend` |
+| No node groups | `aws eks list-nodegroups --cluster-name lab-commit-eks` | `"nodegroups": []` |
+| Fargate only | `kubectl get nodes -o wide` | every node name starts with `fargate-` |
+| Cluster version | `aws eks describe-cluster --name lab-commit-eks --query cluster.version` | `"1.35"` |
+| Monitoring | Grafana dashboard `Lab-Commit` | CPU, memory and pod count panels for `frontend` and `backend` |
+| Autoscaling | `./scripts/run-loadgen.sh "$AWS_REGION"` and `kubectl -n lab get pods -l app.kubernetes.io/name=frontend -w` | 1 to 4 pods during the hold, back to 1 a few minutes after the ramp down |
+| Pipeline | release `v1.0.1` as in step 10 | `Hello Lab-Commit v1.0.1 <value>` |
+
+## Teardown
 
 ```bash
-cd terraform/<stack>
-terraform destroy
+./scripts/destroy.sh "$AWS_REGION"
 ```
 
-Delete Kubernetes ingresses before destroying the VPC, or load balancer ENIs will block deletion.
+The script asks for the exact phrase `destroy lab-commit`, then:
+
+1. Deletes the Argo CD `root` and `lab` Applications. Their finalizers remove the chart resources, so Argo CD cannot recreate the Ingresses.
+2. Deletes any remaining Ingress and waits until no load balancer named `k8s-labcommit*` is left. Without this step the ALB, its ENIs and its security group rules block the VPC destroy.
+3. Runs `terraform destroy` in `70-pipeline`, `60-windows`, `50-edge` (with `alb_ready=false`), `40-data`, `30-platform`, `20-eks`, `10-network`.
+4. Deletes the ECR repositories created by the pull-through cache and the mirror script (`ecr-public/`, `k8s/`, `quay/`, `mirror/`).
+
+The state bucket and budget in `00-bootstrap` stay, so the next session starts quickly. Add `--with-bootstrap` to remove them too. Delete the GitHub token and the repository webhook on GitHub if the lab is over.
+
+## Costs
+
+On-demand prices in `il-central-1`, October 2026, rounded:
+
+| Item | Hourly | 30 days |
+|---|---|---|
+| EKS control plane | 0.100 | 73 |
+| Interface endpoints, 13 services in 2 AZs (26 x 0.01155) | 0.300 | 219 |
+| Fargate, about 16 pods of 0.25 vCPU / 1 GB plus Prometheus at 0.5 vCPU / 2 GB | 0.32 | 233 |
+| Windows `t3.medium` | 0.066 | 48 |
+| ALB (plus LCUs) | 0.026 | 19 |
+| RDS `db.t4g.micro` and 20 GB gp3 | 0.021 | 15 |
+| fck-nat `t4g.micro` | 0.010 | 7 |
+| **Total** | **about 0.84** | **about 615** |
+
+Ways to keep it low:
+
+- Destroy everything after each session with `scripts/destroy.sh`. A full rebuild takes about 60 minutes.
+- Stop the Windows instance when not browsing.
+- The endpoints are the largest fixed cost. With NAT in place only `ssm`, `ssmmessages` and `ec2messages` are required (the Windows instance has no NAT access). Setting `interface_endpoints` to those three in stack 10 brings that line down to about 50 per month.
+- The budget alarm from stack 00 emails at the thresholds set there.

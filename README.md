@@ -15,6 +15,83 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 | 60-windows | Windows instance via SSM, Chrome from S3, lab CA trusted | done |
 | 70-pipeline | CodeBuild release with GitHub webhook, ECR, Argo CD app-of-apps | done |
 
+## Architecture
+
+### Runtime
+
+Everything runs in private subnets. The only path to the application is from inside the VPC: the Windows instance resolves `*.lab.internal` in the private zone and reaches the internal ALB over HTTPS. Pods pull images from ECR and call AWS APIs through interface endpoints. The fck-nat instance gives private subnets outbound access to GitHub, Docker Hub and GHCR.
+
+```mermaid
+flowchart LR
+  admin["Workstation"]
+  github["GitHub ichcc/lab-commit"]
+
+  subgraph aws["AWS account, il-central-1"]
+    ssm["Systems Manager"]
+    acm["ACM imported certificate"]
+    sm["Secrets Manager"]
+    ecr["ECR app repos, pull-through cache, mirror"]
+
+    subgraph vpc["VPC 10.20.0.0/16"]
+      subgraph pub["Public subnet"]
+        nat["fck-nat t4g.micro"]
+      end
+
+      subgraph priv["Private subnets, 2 AZ"]
+        win["Windows Server 2022, Chrome, lab CA trusted"]
+        dns["Route53 private zone lab.internal"]
+        alb["Internal ALB, 443 and 80 redirect"]
+        vpce["Interface endpoints and S3 gateway"]
+        rds[("RDS PostgreSQL 18")]
+
+        subgraph eks["EKS 1.35, Fargate only"]
+          fe["frontend"]
+          be["backend"]
+          seed["seed Job"]
+          argocd["Argo CD"]
+          grafana["Grafana"]
+          prom["Prometheus"]
+          keda["KEDA"]
+          lbc["Load Balancer Controller"]
+        end
+      end
+    end
+  end
+
+  admin -->|"Fleet Manager RDP"| ssm --> win
+  win -->|"DNS"| dns
+  win -->|"HTTPS"| alb
+  acm -.-> alb
+  alb --> fe
+  alb --> argocd
+  alb --> grafana
+  fe -->|"GET /value every 5 s"| be
+  be -->|"5432"| rds
+  seed --> rds
+  be -->|"IRSA"| vpce --> sm
+  eks -->|"image pulls"| vpce --> ecr
+  prom -->|"scrape"| fe
+  keda -->|"request rate"| prom
+  keda -->|"1 to 4 replicas"| fe
+  lbc -->|"manages"| alb
+  argocd -->|"poll"| nat --> github
+```
+
+### Release
+
+```mermaid
+flowchart LR
+  dev["Developer"] -->|"push VERSION or apps/"| github["GitHub"]
+  github -->|"webhook"| cb["CodeBuild lab-commit-release"]
+  cb -->|"lab/backend and lab/frontend tagged VERSION"| ecr["ECR"]
+  cb -->|"Release vX [skip ci], Chart.yaml bump"| github
+  argocd["Argo CD lab Application"] -->|"poll every 3 min"| github
+  argocd -->|"sync charts/lab"| eks["EKS namespace lab"]
+  eks -->|"pull"| ecr
+```
+
+The release commit changes only `charts/lab/Chart.yaml` and carries `[skip ci]`, so the webhook filters drop it and no second build starts.
+
 ## Prerequisites
 
 - AWS CLI v2, Terraform >= 1.10, kubectl, Helm 3, Docker, Git

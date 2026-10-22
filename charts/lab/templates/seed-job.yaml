@@ -1,0 +1,47 @@
+{{- if .Values.seed.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: seed
+  labels:
+    {{- include "lab.labels" . | nindent 4 }}
+    {{- include "lab.selector" "seed" | nindent 4 }}
+  annotations:
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 4
+  ttlSecondsAfterFinished: 600
+  template:
+    metadata:
+      labels:
+        {{- include "lab.labels" . | nindent 8 }}
+        {{- include "lab.selector" "seed" | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: {{ .Values.backend.serviceAccountName }}
+      securityContext:
+        {{- include "lab.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: seed
+          image: {{ include "lab.image" (list . .Values.backend.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["python", "seed.py"]
+          env:
+            - name: DB_HOST
+              value: {{ required "db.host is required" .Values.db.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.db.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.db.name | quote }}
+            - name: DB_SSLMODE
+              value: {{ .Values.db.sslmode | quote }}
+            - name: DB_SECRET_ARN
+              value: {{ required "db.secretArn is required" .Values.db.secretArn | quote }}
+            - name: SEED_VALUES
+              value: {{ .Values.seed.values | quote }}
+          resources:
+            {{- toYaml .Values.seed.resources | nindent 12 }}
+          securityContext:
+            {{- include "lab.containerSecurityContext" . | nindent 12 }}
+{{- end }}

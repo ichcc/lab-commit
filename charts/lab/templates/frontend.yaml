@@ -1,0 +1,87 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: frontend
+  labels:
+    {{- include "lab.labels" . | nindent 4 }}
+    {{- include "lab.selector" "frontend" | nindent 4 }}
+automountServiceAccountToken: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  labels:
+    {{- include "lab.labels" . | nindent 4 }}
+    {{- include "lab.selector" "frontend" | nindent 4 }}
+spec:
+  {{- if not .Values.keda.enabled }}
+  replicas: {{ .Values.frontend.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "lab.selector" "frontend" | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lab.labels" . | nindent 8 }}
+        {{- include "lab.selector" "frontend" | nindent 8 }}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.frontend.port | quote }}
+        prometheus.io/path: /metrics
+    spec:
+      serviceAccountName: frontend
+      securityContext:
+        {{- include "lab.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: frontend
+          image: {{ include "lab.image" (list . .Values.frontend.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.frontend.port }}
+          env:
+            - name: APP_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            - name: BACKEND_URL
+              value: {{ printf "http://backend:%v" .Values.backend.port | quote }}
+            - name: POLL_SECONDS
+              value: {{ .Values.frontend.pollSeconds | quote }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.frontend.resources | nindent 12 }}
+          securityContext:
+            {{- include "lab.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  labels:
+    {{- include "lab.labels" . | nindent 4 }}
+    {{- include "lab.selector" "frontend" | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "lab.selector" "frontend" | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http

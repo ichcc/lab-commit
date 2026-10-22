@@ -1,0 +1,88 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Values.backend.serviceAccountName }}
+  labels:
+    {{- include "lab.labels" . | nindent 4 }}
+    {{- include "lab.selector" "backend" | nindent 4 }}
+  annotations:
+    eks.amazonaws.com/role-arn: {{ required "backend.roleArn is required" .Values.backend.roleArn }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  labels:
+    {{- include "lab.labels" . | nindent 4 }}
+    {{- include "lab.selector" "backend" | nindent 4 }}
+spec:
+  replicas: {{ .Values.backend.replicas }}
+  selector:
+    matchLabels:
+      {{- include "lab.selector" "backend" | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "lab.labels" . | nindent 8 }}
+        {{- include "lab.selector" "backend" | nindent 8 }}
+    spec:
+      serviceAccountName: {{ .Values.backend.serviceAccountName }}
+      securityContext:
+        {{- include "lab.podSecurityContext" . | nindent 8 }}
+      containers:
+        - name: backend
+          image: {{ include "lab.image" (list . .Values.backend.repository) }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.backend.port }}
+          env:
+            - name: APP_VERSION
+              value: {{ .Chart.AppVersion | quote }}
+            - name: DB_HOST
+              value: {{ required "db.host is required" .Values.db.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.db.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.db.name | quote }}
+            - name: DB_SSLMODE
+              value: {{ .Values.db.sslmode | quote }}
+            - name: DB_SECRET_ARN
+              value: {{ required "db.secretArn is required" .Values.db.secretArn | quote }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          resources:
+            {{- toYaml .Values.backend.resources | nindent 12 }}
+          securityContext:
+            {{- include "lab.containerSecurityContext" . | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  labels:
+    {{- include "lab.labels" . | nindent 4 }}
+    {{- include "lab.selector" "backend" | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "lab.selector" "backend" | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.backend.port }}
+      targetPort: http

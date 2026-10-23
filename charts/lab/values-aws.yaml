@@ -5,7 +5,7 @@ backend:
   roleArn: arn:aws:iam::788717064995:role/lab-commit-il-central-1-backend
 db:
   host: lab-commit-db.clsagma8yfi1.il-central-1.rds.amazonaws.com
-  secretArn: arn:aws:secretsmanager:il-central-1:788717064995:secret:rds!db-7104fe27-780d-4952-be99-75cbcf5dba2d-Xq18Ff
+  secretArn: arn:aws:secretsmanager:il-central-1:788717064995:secret:rds!db-74f0eac8-2215-4d42-a069-3edc2d2900c9-TvmxQ2
 ingress:
-  certificateArn: arn:aws:acm:il-central-1:788717064995:certificate/417708e9-4f44-462b-98b2-30f05a25eb3c
-  securityGroupId: sg-03186ef5387afadd8
+  certificateArn: arn:aws:acm:il-central-1:788717064995:certificate/16da3c7d-c7fc-4aba-880e-262b5d3753bb
+  securityGroupId: sg-0782781fafddb57dd

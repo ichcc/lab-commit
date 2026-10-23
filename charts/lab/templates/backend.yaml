@@ -6,6 +6,7 @@ metadata:
     {{- include "lab.labels" . | nindent 4 }}
     {{- include "lab.selector" "backend" | nindent 4 }}
   annotations:
+    argocd.argoproj.io/sync-wave: "-2"
     eks.amazonaws.com/role-arn: {{ required "backend.roleArn is required" .Values.backend.roleArn }}
 ---
 apiVersion: apps/v1

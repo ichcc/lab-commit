@@ -320,7 +320,7 @@ The pipeline in stack 70 builds and pushes both images to the `lab/backend` and 
 | Deployments `frontend`, `backend` | Non-root, read-only root filesystem, requests 250m CPU and 512Mi (one Fargate 0.25 vCPU / 1 GB slot), `/healthz` readiness probes; liveness uses `/healthz` on the backend and `/livez` on the frontend, so a backend outage takes frontend pods out of the Service without restarting them. `APP_VERSION` comes from `.Chart.AppVersion`, and so does the image tag unless `image.tag` is set |
 | Services | ClusterIP only. The backend has no Ingress |
 | ServiceAccounts | `backend` carries the IRSA annotation `backend.roleArn`. `frontend` has no token mounted |
-| Job `seed` | Helm `post-install,post-upgrade` hook, which Argo CD runs as a PostSync hook. Uses the backend image and service account |
+| Job `seed` | Argo CD `Sync` hook in sync wave `-1`, after the `backend` ServiceAccount (wave `-2`) and before the Deployments, Services and Ingresses (wave 0). The frontend reports ready only with a value from the backend, so the table must exist before the Deployments are checked for health; a PostSync hook would wait for a healthy frontend and never run on an empty database. The Helm `post-install,post-upgrade` annotations stay for a plain `helm install`, and Argo CD ignores them because the Argo CD hook annotation is present. Uses the backend image and service account |
 | Ingress `frontend` | Internal ALB, `target-type: ip`, group `lab-commit`, ports 80 and 443 with redirect to 443, ACM certificate, host `lab-commit-task.<zone>` |
 | Ingresses `argocd`, `grafana` | Same ALB group, created in the `argocd` and `monitoring` namespaces, hosts `argocd.<zone>` and `grafana.<zone>` |
 | ScaledObject `frontend` | Prometheus trigger `sum(rate(http_requests_total{namespace="lab"}[1m]))`, `AverageValue` 10, 1 to 4 replicas, `cooldownPeriod` 60, scale-down stabilization 60 s and at most one pod every 30 s |
@@ -351,6 +351,8 @@ Troubleshooting:
 - Pods stay `Pending`: the namespace has no Fargate profile, or the requests do not fit a Fargate size. `kubectl -n lab describe pod <pod>` shows the reason.
 - `ImagePullBackOff`: the images are not pushed yet, or the tag does not match `appVersion`. `aws ecr describe-images --repository-name lab/frontend`.
 - Frontend pods stay `0/1` or the page shows `(stale)`: the frontend has no fresh value from the backend. `kubectl -n lab exec deploy/frontend -- python -c "import urllib.request as u; print(u.urlopen('http://localhost:8080/healthz').read())"` fails with 503 and the frontend logs show `backend poll failed`.
+- The sync stays in wave `-1` (`kubectl -n argocd get application lab -o jsonpath='{.status.operationState.message}'`): the seed Job cannot reach the database or Secrets Manager. `kubectl -n lab logs job/seed`. Argo CD retries the sync five times, then run `argocd app sync lab` or click Sync after fixing the cause.
+- `helm install --wait` times out: with `--wait` Helm waits for a ready frontend before it runs the seed hook. Install without `--wait`, or use Argo CD.
 - The page shows `n/a`: the backend is not ready or the seed Job has not finished. `kubectl -n lab logs deploy/backend` and `kubectl -n lab get jobs`.
 - All three Ingresses in one group must carry the same scheme, certificate and security group annotations, otherwise the controller rejects the group. `kubectl -n lab describe ingress frontend` shows the error event.
 - The ScaledObject is not `READY`: KEDA cannot reach Prometheus. `kubectl -n lab describe scaledobject frontend` and `kubectl -n keda logs deploy/keda-operator`. An empty query result before the first page request counts as 0 and is not an error.
@@ -608,7 +610,7 @@ kubectl apply -f gitops/root.yaml
 kubectl -n argocd get applications -w
 ```
 
-Expected: `root` and `lab` become `Synced` and `Healthy` within a few minutes. The seed Job runs after the sync, then the ALB appears. Continue with phase two of stack 50 to create the DNS records.
+Expected: `root` and `lab` become `Synced` and `Healthy` within a few minutes. The seed Job runs first, then the Deployments start and the ALB appears. Continue with phase two of stack 50 to create the DNS records.
 
 ```bash
 kubectl -n lab get pods,svc,ingress,scaledobject

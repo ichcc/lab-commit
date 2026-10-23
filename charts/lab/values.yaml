@@ -10,6 +10,7 @@ frontend:
   replicas: 1
   port: 8080
   pollSeconds: 5
+  staleSeconds: 30
   resources:
     requests:
       cpu: 250m

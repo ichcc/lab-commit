@@ -48,6 +48,8 @@ spec:
               value: {{ printf "http://backend:%v" .Values.backend.port | quote }}
             - name: POLL_SECONDS
               value: {{ .Values.frontend.pollSeconds | quote }}
+            - name: STALE_SECONDS
+              value: {{ .Values.frontend.staleSeconds | quote }}
           readinessProbe:
             httpGet:
               path: /healthz
@@ -55,7 +57,7 @@ spec:
             periodSeconds: 10
           livenessProbe:
             httpGet:
-              path: /healthz
+              path: /livez
               port: http
             initialDelaySeconds: 10
             periodSeconds: 20

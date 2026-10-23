@@ -49,6 +49,35 @@ def test_index_before_first_poll(monkeypatch):
     assert body == "Hello Lab-Commit v1.0.0 n/a\n"
 
 
+def test_index_marks_stale_value(monkeypatch):
+    monkeypatch.setattr(frontend, "APP_VERSION", "v1.0.0")
+    frontend.state.update(value=42, updated=frontend.time.time() - frontend.STALE_SECONDS - 1)
+    body = frontend.app.test_client().get("/").get_data(as_text=True)
+    assert body == "Hello Lab-Commit v1.0.0 42 (stale)\n"
+
+
+def test_healthz_not_ready_before_first_poll():
+    response = frontend.app.test_client().get("/healthz")
+    assert response.status_code == 503
+    assert response.get_json()["status"] == "stale"
+
+
+def test_healthz_ready_with_fresh_value():
+    frontend.poll_once(FakeSession(FakeResponse({"value": 42})))
+    response = frontend.app.test_client().get("/healthz")
+    assert response.status_code == 200
+    assert response.get_json()["value"] == 42
+
+
+def test_healthz_not_ready_with_stale_value():
+    frontend.state.update(value=42, updated=frontend.time.time() - frontend.STALE_SECONDS - 1)
+    assert frontend.app.test_client().get("/healthz").status_code == 503
+
+
+def test_livez_ignores_backend_state():
+    assert frontend.app.test_client().get("/livez").status_code == 200
+
+
 def test_poll_failure_keeps_last_value():
     frontend.poll_once(FakeSession(FakeResponse({"value": 7})))
     frontend.poll_once(FakeSession(error=requests.ConnectionError("down")))
@@ -61,6 +90,7 @@ def test_only_page_requests_are_counted():
     before = page_requests()
     client.get("/")
     client.get("/healthz")
+    client.get("/livez")
     client.get("/metrics")
     client.get("/")
     assert page_requests() - before == 2

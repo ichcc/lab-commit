@@ -276,7 +276,7 @@ Two Flask services in `apps/`, packaged by the Helm chart `charts/lab`. Argo CD 
 | Service | Port | Endpoints | Notes |
 |---|---|---|---|
 | backend | 8000 | `GET /value`, `GET /healthz` | Reads the database password from Secrets Manager with boto3 through IRSA, returns the next row of `lab_values` in a loop. The loop position is the sequence `lab_values_cursor`, so all replicas share it |
-| frontend | 8080 | `GET /`, `GET /healthz`, `GET /metrics` | A background thread polls the backend every 5 seconds. `/` returns `Hello Lab-Commit <APP_VERSION> <value>`. `http_requests_total` counts only `/`, not health checks or scrapes |
+| frontend | 8080 | `GET /`, `GET /healthz`, `GET /livez`, `GET /metrics` | A background thread polls the backend every 5 seconds. `/` returns `Hello Lab-Commit <APP_VERSION> <value>`, with ` (stale)` appended when the last successful poll is older than `STALE_SECONDS` (30). `/healthz` is the readiness check and returns 503 until the first successful poll and whenever the value is stale; `/livez` only reports that the process is up. `http_requests_total` counts only `/`, not health checks or scrapes |
 
 `seed.py` in the backend image creates `lab_values` and the sequence and inserts the initial rows only when the table is empty. The chart runs it as a Job.
 
@@ -317,7 +317,7 @@ The pipeline in stack 70 builds and pushes both images to the `lab/backend` and 
 
 | Object | Details |
 |---|---|
-| Deployments `frontend`, `backend` | Non-root, read-only root filesystem, requests 250m CPU and 512Mi (one Fargate 0.25 vCPU / 1 GB slot), `/healthz` probes. `APP_VERSION` comes from `.Chart.AppVersion`, and so does the image tag unless `image.tag` is set |
+| Deployments `frontend`, `backend` | Non-root, read-only root filesystem, requests 250m CPU and 512Mi (one Fargate 0.25 vCPU / 1 GB slot), `/healthz` readiness probes; liveness uses `/healthz` on the backend and `/livez` on the frontend, so a backend outage takes frontend pods out of the Service without restarting them. `APP_VERSION` comes from `.Chart.AppVersion`, and so does the image tag unless `image.tag` is set |
 | Services | ClusterIP only. The backend has no Ingress |
 | ServiceAccounts | `backend` carries the IRSA annotation `backend.roleArn`. `frontend` has no token mounted |
 | Job `seed` | Helm `post-install,post-upgrade` hook, which Argo CD runs as a PostSync hook. Uses the backend image and service account |
@@ -350,6 +350,7 @@ Troubleshooting:
 
 - Pods stay `Pending`: the namespace has no Fargate profile, or the requests do not fit a Fargate size. `kubectl -n lab describe pod <pod>` shows the reason.
 - `ImagePullBackOff`: the images are not pushed yet, or the tag does not match `appVersion`. `aws ecr describe-images --repository-name lab/frontend`.
+- Frontend pods stay `0/1` or the page shows `(stale)`: the frontend has no fresh value from the backend. `kubectl -n lab exec deploy/frontend -- python -c "import urllib.request as u; print(u.urlopen('http://localhost:8080/healthz').read())"` fails with 503 and the frontend logs show `backend poll failed`.
 - The page shows `n/a`: the backend is not ready or the seed Job has not finished. `kubectl -n lab logs deploy/backend` and `kubectl -n lab get jobs`.
 - All three Ingresses in one group must carry the same scheme, certificate and security group annotations, otherwise the controller rejects the group. `kubectl -n lab describe ingress frontend` shows the error event.
 - The ScaledObject is not `READY`: KEDA cannot reach Prometheus. `kubectl -n lab describe scaledobject frontend` and `kubectl -n keda logs deploy/keda-operator`. An empty query result before the first page request counts as 0 and is not an error.

@@ -15,6 +15,7 @@ phases:
       - '[[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION must look like v1.2.3, got $VERSION"; exit 1; }'
       - CHART_VERSION="${VERSION#v}"
       - VERSION_COMMIT="$(git log -1 --format=%H -- VERSION)"
+      - GIT_REMOTE="https://x-access-token:${GITHUB_TOKEN}@${REPOSITORY_URL#https://}"
       - echo "release $VERSION from commit $CODEBUILD_RESOLVED_SOURCE_VERSION"
       - aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 
@@ -43,16 +44,29 @@ phases:
   post_build:
     on-failure: ABORT
     commands:
+      - git config user.name "$GIT_AUTHOR_NAME"
+      - git config user.email "$GIT_AUTHOR_EMAIL"
       - |
-        sed -i -E "s/^version:.*/version: $CHART_VERSION/; s/^appVersion:.*/appVersion: \"$VERSION\"/" charts/lab/Chart.yaml
-      - cat charts/lab/Chart.yaml
-      - |
-        if git diff --quiet -- charts/lab/Chart.yaml; then
-          echo "chart already at $VERSION"
-          exit 0
-        fi
-        git config user.name "$GIT_AUTHOR_NAME"
-        git config user.email "$GIT_AUTHOR_EMAIL"
-        git add charts/lab/Chart.yaml
-        git commit -m "Release $VERSION [skip ci]"
-        git push "https://x-access-token:${GITHUB_TOKEN}@${REPOSITORY_URL#https://}" "HEAD:refs/heads/$BRANCH"
+        for attempt in 1 2 3 4 5; do
+          git fetch --quiet "$GIT_REMOTE" "$BRANCH"
+          git checkout --quiet --force -B release FETCH_HEAD
+          current="$(tr -d '[:space:]' < VERSION)"
+          if [[ "$current" != "$VERSION" ]]; then
+            echo "$BRANCH has VERSION $current now, release of $VERSION is superseded"
+            exit 0
+          fi
+          sed -i -E "s/^version:.*/version: $CHART_VERSION/; s/^appVersion:.*/appVersion: \"$VERSION\"/" charts/lab/Chart.yaml
+          cat charts/lab/Chart.yaml
+          if git diff --quiet -- charts/lab/Chart.yaml; then
+            echo "chart already at $VERSION"
+            exit 0
+          fi
+          git commit --quiet -m "Release $VERSION [skip ci]" -- charts/lab/Chart.yaml
+          if git push "$GIT_REMOTE" "HEAD:refs/heads/$BRANCH"; then
+            exit 0
+          fi
+          echo "push rejected, attempt $attempt"
+          sleep $((attempt * 5))
+        done
+        echo "could not push the release commit"
+        exit 1

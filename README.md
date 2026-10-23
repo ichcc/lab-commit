@@ -536,6 +536,8 @@ git push (VERSION or apps/**)
 
 The commit-back cannot start a new build, for two independent reasons: the webhook only reacts to changes in `VERSION` or `apps/`, while the commit-back touches only `charts/lab/Chart.yaml`, and the webhook drops commits whose message contains `[skip ci]`. ECR repositories are `IMMUTABLE`, so rebuilding the same version never overwrites an image. When an image tag already exists, the build compares `apps/<service>` with the commit that last changed `VERSION`. If the code is the same it skips the image; if the code changed, the build fails with `bump VERSION to release it`, so a green build never leaves new code undeployed.
 
+The commit-back runs on top of the current branch head, not on the commit that started the build. It fetches the branch, stops without a commit if `VERSION` there has already moved to a newer release, sets the chart version and pushes. A push rejected because the branch moved in the meantime is retried up to five times.
+
 | Component | Where |
 |---|---|
 | `VERSION` | Release version, for example `v1.0.0` |
@@ -632,6 +634,8 @@ Troubleshooting:
 - `terraform apply -var github_token_ready=true` fails with `Repository not found` or `Could not create webhook`: the token lacks the Webhooks permission, the repository does not exist yet, or the secret value is not the JSON shown above.
 - Build fails at `docker login` or `docker pull`: the CodeBuild security group must allow egress, and the private subnets need the NAT route from stack 10.
 - Build fails with `apps/frontend changed after v1.0.1 was set ... bump VERSION to release it`: a change under `apps/` was pushed without a new `VERSION`. Bump `VERSION` and push.
+- Build log shows `release of v1.0.1 is superseded`: a newer `VERSION` reached the branch during the build, and its own build will update the chart.
+- Build fails with `could not push the release commit`: the branch kept moving for five attempts. Run the build again with `aws codebuild start-build --project-name lab-commit-release`.
 - Build fails at `git push` with 403: the token lacks Contents write, or branch protection blocks pushes from it.
 - Argo CD shows `values-aws.yaml: no such file`: run `scripts/render-values.sh`, commit and push.
 - Argo CD shows `ComparisonError` with `required`: a value in `values-aws.yaml` is empty because a Terraform output was missing when the script ran.

@@ -731,14 +731,22 @@ Run from the workstation unless the line says Windows. `export AWS_REGION=il-cen
 ./scripts/destroy.sh "$AWS_REGION"
 ```
 
+The script writes a temporary kubeconfig for the cluster `lab-commit-eks` in the given region, so the current `kubectl` context does not matter and no other cluster is touched.
+
 The script asks for the exact phrase `destroy lab-commit`, then:
 
 1. Deletes the Argo CD `root` and `lab` Applications. Their finalizers remove the chart resources, so Argo CD cannot recreate the Ingresses.
-2. Deletes any remaining Ingress and waits until no load balancer named `k8s-labcommit*` is left. Without this step the ALB, its ENIs and its security group rules block the VPC destroy.
+2. Deletes only the Ingresses with the annotation `alb.ingress.kubernetes.io/group.name: lab-commit` and waits until no load balancer named `k8s-labcommit*` is left. Without this step the ALB, its ENIs and its security group rules block the VPC destroy.
 3. Runs `terraform destroy` in `70-pipeline`, `60-windows`, `50-edge` (with `alb_ready=false`), `40-data`, `30-platform`, `20-eks`, `10-network`.
-4. Deletes the ECR repositories created by the pull-through cache and the mirror script (`ecr-public/`, `k8s/`, `quay/`, `mirror/`).
+4. Deletes the ECR repositories created by this project: repositories under the prefixes of the pull-through cache rules found in the `20-eks` state (`ecr-public/`, `k8s/`, `quay/`), collected before that stack is destroyed, and the `mirror/` repositories named in `scripts/mirror-images.txt`.
 
 The state bucket and budget in `00-bootstrap` stay, so the next session starts quickly. Add `--with-bootstrap` to remove them too. Delete the GitHub token and the repository webhook on GitHub if the lab is over.
+
+Troubleshooting:
+
+- `kubectl get ingress` fails with a timeout: the API endpoint allows only `admin_cidrs` from stack 20, and your current IP is not in it. Update `admin_cidrs`, apply stack 20 and run the script again.
+- `load balancers still exist`: an Ingress outside the `lab-commit` group, or one with a stuck finalizer, still owns the ALB. `kubectl get ingress -A` and `kubectl -n kube-system logs deploy/aws-load-balancer-controller`.
+- A stack fails halfway: fix the cause and run the script again. Finished stacks have empty state and are skipped quickly. If `20-eks` was already destroyed in an earlier run, the cache rules are gone from its state and the script cannot attribute the cache repositories any more: list them with `aws ecr describe-repositories --query 'repositories[].repositoryName'` and delete the `ecr-public/`, `k8s/` and `quay/` ones by hand after checking that nobody else uses them.
 
 ## Costs
 

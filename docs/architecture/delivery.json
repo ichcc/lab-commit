@@ -6,12 +6,12 @@
   "input": "/Users/ichcc/Projects/personal/comit/docs/architecture/architecture.json",
   "output": "/Users/ichcc/Projects/personal/comit/docs/architecture/index.html",
   "specification": {
-    "sha256": "c08517186da192b70d98fea35cd9ff897cbefdc21635bbb03e5d928a34138d87",
-    "bytes": 8870
+    "sha256": "badc400f1fb9859a06b5167415e0b6babbb0dde9f0106d57a28f3ad7d0ae2a75",
+    "bytes": 8866
   },
   "artifact": {
-    "sha256": "bdbd7deeaef3cdaa55c2577b4e2643c1ca7a31f5ae0dec5f41ed0d5dadeb1a43",
-    "bytes": 724953
+    "sha256": "0666182579ff09af7383b40acbeeb1fc8377468ed6598931f5b47762af5650ce",
+    "bytes": 724949
   },
   "validation": {
     "checksPassed": 9,
@@ -24,7 +24,7 @@
   "evidence": {
     "verified": true,
     "repository": "https://github.com/ichcc/lab-commit",
-    "revision": "62e00e4ee6119a393a9d793eea748061912af11c",
+    "revision": "b3e6a5d2484fe3878f422d677556971b70b367c0",
     "references": 12
   }
 }

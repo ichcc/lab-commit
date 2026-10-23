@@ -12,7 +12,7 @@
     ],
     "repository": {
       "url": "https://github.com/ichcc/lab-commit",
-      "revision": "62e00e4ee6119a393a9d793eea748061912af11c"
+      "revision": "b3e6a5d2484fe3878f422d677556971b70b367c0"
     },
     "views": [
       {
@@ -419,7 +419,7 @@
       "title": "Private runtime",
       "items": [
         "Route53 lab.internal aliases → internal ALB (alb_ready=true). ACM terminates TLS; ALB also routes Argo CD and Grafana.",
-        "Frontend polls GET /value every 5s. Seed PostSync Job initializes RDS. Backend reads the RDS-managed secret using IRSA."
+        "Frontend polls GET /value every 5s. Sync-hook Job seeds RDS first. Backend reads the RDS-managed secret using IRSA."
       ]
     },
     {

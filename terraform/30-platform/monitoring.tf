@@ -3,6 +3,21 @@ resource "random_password" "grafana" {
   special = false
 }
 
+locals {
+  kubelet_proxy_relabel = yamlencode([
+    {
+      target_label = "__address__"
+      replacement  = "kubernetes.default.svc:443"
+    },
+    {
+      source_labels = ["__meta_kubernetes_node_name", "__metrics_path__"]
+      regex         = "(.+);(.+)"
+      target_label  = "__metrics_path__"
+      replacement   = "/api/v1/nodes/$1/proxy$2"
+    },
+  ])
+}
+
 resource "helm_release" "prometheus" {
   name             = "prometheus"
   namespace        = "monitoring"
@@ -30,6 +45,37 @@ resource "helm_release" "prometheus" {
       persistentVolume = { enabled = false }
       resources        = { requests = { cpu = "500m", memory = "1Gi" } }
     }
+    scrapeConfigs = {
+      kubernetes-nodes          = { post_relabel_configs = local.kubelet_proxy_relabel }
+      kubernetes-nodes-cadvisor = { post_relabel_configs = local.kubelet_proxy_relabel }
+    }
+    extraManifests = [
+      yamlencode({
+        apiVersion = "rbac.authorization.k8s.io/v1"
+        kind       = "ClusterRole"
+        metadata   = { name = "prometheus-server-nodes-proxy" }
+        rules = [{
+          apiGroups = [""]
+          resources = ["nodes/proxy"]
+          verbs     = ["get"]
+        }]
+      }),
+      yamlencode({
+        apiVersion = "rbac.authorization.k8s.io/v1"
+        kind       = "ClusterRoleBinding"
+        metadata   = { name = "prometheus-server-nodes-proxy" }
+        roleRef = {
+          apiGroup = "rbac.authorization.k8s.io"
+          kind     = "ClusterRole"
+          name     = "prometheus-server-nodes-proxy"
+        }
+        subjects = [{
+          kind      = "ServiceAccount"
+          name      = "prometheus-server"
+          namespace = "monitoring"
+        }]
+      }),
+    ]
   })]
 
   depends_on = [helm_release.lbc]

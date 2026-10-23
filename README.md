@@ -194,7 +194,7 @@ Installed releases:
 | aws-load-balancer-controller | kube-system | IRSA role, Shield/WAF disabled, VPC id and region set explicitly because Fargate has no instance metadata |
 | keda | keda | Images from `mirror/kedacore/*` |
 | argocd | argocd | Dex and notifications disabled, `server.insecure=true` so the ALB terminates TLS |
-| prometheus | monitoring | No node-exporter, Alertmanager or Pushgateway (DaemonSets and PVCs do not fit Fargate). Retention 6h, no persistent volume. Pod CPU and memory come from kubelet cAdvisor through the API server proxy, replica counts from kube-state-metrics |
+| prometheus | monitoring | No node-exporter, Alertmanager or Pushgateway (DaemonSets and PVCs do not fit Fargate). Retention 6h, no persistent volume. Fargate exposes no kubelet port to pods, so the `kubernetes-nodes` and `kubernetes-nodes-cadvisor` jobs are rewritten to `https://kubernetes.default.svc/api/v1/nodes/<node>/proxy/metrics[/cadvisor]`, and the extra ClusterRole `prometheus-server-nodes-proxy` grants `nodes/proxy`. Pod CPU and memory come from that cAdvisor job, replica counts from kube-state-metrics |
 | grafana | monitoring | Prometheus datasource and the `Lab-Commit` dashboard are provisioned from `dashboards/lab-commit.json` |
 
 Check:
@@ -213,6 +213,10 @@ kubectl -n monitoring port-forward svc/grafana 3000:80
 ```
 
 Fargate pods take one to two minutes to start, so the first apply can take about 10 minutes. If a release times out, run `terraform apply` again.
+
+Troubleshooting:
+
+- The CPU and memory panels are empty: open `http://localhost:9090/targets` after `kubectl -n monitoring port-forward svc/prometheus-server 9090:80`. The `kubernetes-nodes-cadvisor` targets must be `UP` with paths like `/api/v1/nodes/fargate-ip-.../proxy/metrics/cadvisor`. A `403` means the `prometheus-server-nodes-proxy` ClusterRoleBinding is missing: `kubectl get clusterrolebinding prometheus-server-nodes-proxy`.
 
 The dashboard panels expect the `lab` namespace, deployments named `frontend` and `backend`, and an `http_requests_total` metric exposed by the frontend with Prometheus scrape annotations.
 

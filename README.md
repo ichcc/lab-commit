@@ -534,7 +534,7 @@ git push (VERSION or apps/**)
 
 `il-central-1` does not offer CodeConnections, so CodePipeline cannot use GitHub as a source there. CodeBuild connects to GitHub directly with a personal access token kept in Secrets Manager, and its webhook starts the build. That is the same build, push and commit-back flow a CodePipeline with one build stage would run.
 
-The commit-back cannot start a new build, for two independent reasons: the webhook only reacts to changes in `VERSION` or `apps/`, while the commit-back touches only `charts/lab/Chart.yaml`, and the webhook drops commits whose message contains `[skip ci]`. ECR repositories are `IMMUTABLE`, and the build skips an image tag that already exists, so rebuilding the same version never overwrites an image.
+The commit-back cannot start a new build, for two independent reasons: the webhook only reacts to changes in `VERSION` or `apps/`, while the commit-back touches only `charts/lab/Chart.yaml`, and the webhook drops commits whose message contains `[skip ci]`. ECR repositories are `IMMUTABLE`, so rebuilding the same version never overwrites an image. When an image tag already exists, the build compares `apps/<service>` with the commit that last changed `VERSION`. If the code is the same it skips the image; if the code changed, the build fails with `bump VERSION to release it`, so a green build never leaves new code undeployed.
 
 | Component | Where |
 |---|---|
@@ -631,6 +631,7 @@ Troubleshooting:
 
 - `terraform apply -var github_token_ready=true` fails with `Repository not found` or `Could not create webhook`: the token lacks the Webhooks permission, the repository does not exist yet, or the secret value is not the JSON shown above.
 - Build fails at `docker login` or `docker pull`: the CodeBuild security group must allow egress, and the private subnets need the NAT route from stack 10.
+- Build fails with `apps/frontend changed after v1.0.1 was set ... bump VERSION to release it`: a change under `apps/` was pushed without a new `VERSION`. Bump `VERSION` and push.
 - Build fails at `git push` with 403: the token lacks Contents write, or branch protection blocks pushes from it.
 - Argo CD shows `values-aws.yaml: no such file`: run `scripts/render-values.sh`, commit and push.
 - Argo CD shows `ComparisonError` with `required`: a value in `values-aws.yaml` is empty because a Terraform output was missing when the script ran.

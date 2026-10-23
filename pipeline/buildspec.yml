@@ -14,6 +14,7 @@ phases:
       - VERSION="$(tr -d '[:space:]' < VERSION)"
       - '[[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "VERSION must look like v1.2.3, got $VERSION"; exit 1; }'
       - CHART_VERSION="${VERSION#v}"
+      - VERSION_COMMIT="$(git log -1 --format=%H -- VERSION)"
       - echo "release $VERSION from commit $CODEBUILD_RESOLVED_SOURCE_VERSION"
       - aws ecr get-login-password --region "$AWS_REGION" | docker login --username AWS --password-stdin "$REGISTRY"
 
@@ -24,8 +25,12 @@ phases:
         for service in backend frontend; do
           image="$REGISTRY/lab/$service:$VERSION"
           if aws ecr describe-images --repository-name "lab/$service" --image-ids imageTag="$VERSION" >/dev/null 2>&1; then
-            echo "$image already exists, skipping build"
-            continue
+            if git diff --quiet "$VERSION_COMMIT" HEAD -- "apps/$service"; then
+              echo "$image already exists, skipping build"
+              continue
+            fi
+            echo "apps/$service changed after $VERSION was set in $VERSION_COMMIT and $image already exists, bump VERSION to release it"
+            exit 1
           fi
           docker build --platform linux/amd64 \
             --build-arg BASE_IMAGE="$REGISTRY/$BASE_IMAGE_PATH" \

@@ -26,11 +26,20 @@ phases:
         for service in backend frontend; do
           image="$REGISTRY/lab/$service:$VERSION"
           if aws ecr describe-images --repository-name "lab/$service" --image-ids imageTag="$VERSION" >/dev/null 2>&1; then
-            if git diff --quiet "$VERSION_COMMIT" HEAD -- "apps/$service"; then
-              echo "$image already exists, skipping build"
+            manifest="$(aws ecr batch-get-image --repository-name "lab/$service" --image-ids imageTag="$VERSION" \
+              --accepted-media-types application/vnd.docker.distribution.manifest.v2+json application/vnd.oci.image.manifest.v1+json \
+              --query 'images[0].imageManifest' --output text)"
+            config_url="$(aws ecr get-download-url-for-layer --repository-name "lab/$service" \
+              --layer-digest "$(jq -r .config.digest <<< "$manifest")" --query downloadUrl --output text)"
+            built_from="$(curl -fsSL "$config_url" | jq -r '.config.Labels["org.opencontainers.image.revision"] // empty')"
+            if [[ -z "$built_from" ]] || ! git cat-file -e "$built_from^{commit}" 2>/dev/null; then
+              built_from="$VERSION_COMMIT"
+            fi
+            if git diff --quiet "$built_from" HEAD -- "apps/$service"; then
+              echo "$image already exists and was built from $built_from, skipping build"
               continue
             fi
-            echo "apps/$service changed after $VERSION was set in $VERSION_COMMIT and $image already exists, bump VERSION to release it"
+            echo "apps/$service changed after $image was built from $built_from, bump VERSION to release it"
             exit 1
           fi
           docker build --platform linux/amd64 \

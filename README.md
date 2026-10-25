@@ -13,14 +13,14 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 | 40-data | RDS PostgreSQL, database secret, backend IRSA role | done |
 | 50-edge | Self-signed CA and certificate in ACM, private Route53 zone, ALB records | done |
 | 60-windows | Windows instance via SSM, Chrome from S3, lab CA trusted | done |
-| 70-pipeline | CodeBuild release with GitHub webhook, ECR, Argo CD app-of-apps | done |
+| 70-pipeline | CodePipeline with a CodeConnections source and a CodeBuild release, ECR, Argo CD app-of-apps | done |
 
 ## Architecture
 
 <a href="https://ichcc.github.io/lab-commit/docs/architecture/">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/architecture/architecture-dark.png">
-    <img alt="Lab-Commit AWS architecture: Windows over SSM reaches the internal ALB, frontend and backend on EKS Fargate, RDS PostgreSQL, KEDA scaling from Prometheus, CodeBuild pushing to ECR, Argo CD polling GitHub" src="docs/architecture/architecture-light.png">
+    <img alt="Lab-Commit AWS architecture: Windows over SSM reaches the internal ALB, frontend and backend on EKS Fargate, RDS PostgreSQL, KEDA scaling from Prometheus, CodePipeline and CodeBuild pushing to ECR, Argo CD polling GitHub" src="docs/architecture/architecture-light.png">
   </picture>
 </a>
 
@@ -28,7 +28,7 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 
 Everything runs in private subnets. The only path to the application is from inside the VPC: the Windows instance resolves `*.lab.internal` in the private zone and reaches the internal ALB over HTTPS. Pods pull images from ECR and call AWS APIs through interface endpoints. The fck-nat instance gives private subnets outbound access to GitHub, Docker Hub and GHCR.
 
-A push that changes `VERSION` or `apps/` starts the CodeBuild release through the GitHub webhook. The release commit changes only `charts/lab/Chart.yaml` and carries `[skip ci]`, so the webhook filters drop it and no second build starts.
+A push that changes `VERSION` or `apps/` starts the CodePipeline release through a CodeConnections trigger. The release commit changes only `charts/lab/Chart.yaml`, which the trigger file filter ignores, so no second run starts.
 
 ## Prerequisites
 
@@ -519,13 +519,15 @@ Cost: about 0.07 USD per hour while running, including the Windows licence. Stop
 
 ## Step 10: pipeline and GitOps
 
-Source of truth is the public GitHub repository `ichcc/lab-commit`. Argo CD deploys `charts/lab` from it, and a CodeBuild project builds the images when the version changes.
+Source of truth is the public GitHub repository `ichcc/lab-commit`. Argo CD deploys `charts/lab` from it, and a CodePipeline builds the images when the version changes.
 
 ### Design
 
 ```
 git push (VERSION or apps/**)
-  -> GitHub webhook -> CodeBuild lab-commit-release (VPC, private subnets, NAT)
+  -> CodeConnections trigger -> CodePipeline lab-commit-release (V2, queued)
+  -> Source: full clone of main through the connection
+  -> Build: CodeBuild lab-commit-release (VPC, private subnets, NAT)
        build apps/backend and apps/frontend, push lab/<service>:<VERSION> to ECR
        set version and appVersion in charts/lab/Chart.yaml
        commit "Release <VERSION> [skip ci]" and push to main
@@ -533,9 +535,9 @@ git push (VERSION or apps/**)
   -> new pods show "Hello Lab-Commit <VERSION> <value>"
 ```
 
-CodeBuild connects to GitHub directly with a personal access token kept in Secrets Manager, and its webhook starts the build, instead of a CodePipeline with a CodeConnections source. That is the same build, push and commit-back flow a CodePipeline with one build stage would run.
+The pipeline reads GitHub through a CodeConnections connection, which is authorized once in the console. The source action hands CodeBuild a full clone (`CODEBUILD_CLONE_REF`), because the build compares `apps/` with the commit that last changed `VERSION`. The connection gives read access only, so the commit-back pushes with a fine-grained token kept in Secrets Manager.
 
-The commit-back cannot start a new build, for two independent reasons: the webhook only reacts to changes in `VERSION` or `apps/`, while the commit-back touches only `charts/lab/Chart.yaml`, and the webhook drops commits whose message contains `[skip ci]`. ECR repositories are `IMMUTABLE`, so rebuilding the same version never overwrites an image. When an image tag already exists, the build compares `apps/<service>` with the commit that last changed `VERSION`. If the code is the same it skips the image; if the code changed, the build fails with `bump VERSION to release it`, so a green build never leaves new code undeployed.
+The commit-back cannot start a new run: the pipeline trigger only reacts to pushes to `main` that change `VERSION` or `apps/**`, while the commit-back touches only `charts/lab/Chart.yaml`. The `[skip ci]` marker in its message is kept for readers and other tools. ECR repositories are `IMMUTABLE`, so rebuilding the same version never overwrites an image. When an image tag already exists, the build compares `apps/<service>` with the commit that last changed `VERSION`. If the code is the same it skips the image; if the code changed, the build fails with `bump VERSION to release it`, so a green build never leaves new code undeployed.
 
 The commit-back runs on top of the current branch head, not on the commit that started the build. It fetches the branch, stops without a commit if `VERSION` there has already moved to a newer release, sets the chart version and pushes. A push rejected because the branch moved in the meantime is retried up to five times.
 
@@ -543,7 +545,7 @@ The commit-back runs on top of the current branch head, not on the commit that s
 |---|---|
 | `VERSION` | Release version, for example `v1.0.0` |
 | `pipeline/buildspec.yml` | Build, push and chart bump |
-| `terraform/70-pipeline` | ECR `lab/backend`, `lab/frontend`; Secrets Manager secret `lab-commit/github-token`; CodeBuild project, source credential, webhook, IAM role, log group, security group |
+| `terraform/70-pipeline` | ECR `lab/backend`, `lab/frontend`; Secrets Manager secret `lab-commit/github-token`; CodeConnections connection, CodePipeline, artifact bucket, CodeBuild project, IAM roles, log group, security group |
 | `gitops/root.yaml` | App-of-apps root, applied once by hand |
 | `gitops/apps/lab.yaml` | Application `lab`: `charts/lab` with `values.yaml` and `values-aws.yaml`, automated sync with prune and self-heal, `CreateNamespace=true` |
 | `charts/lab/values-aws.yaml` | Account specific values, generated by `scripts/render-values.sh` from Terraform outputs |
@@ -561,9 +563,9 @@ git push -u origin main
 
 ### 2. GitHub token
 
-Create a fine-grained personal access token for `ichcc/lab-commit` only, with repository permissions Contents: read and write, Webhooks: read and write, Metadata: read. CodeBuild uses it to clone, to register the webhook and to push the chart bump.
+Create a fine-grained personal access token for `ichcc/lab-commit` only, with repository permissions Contents: read and write and Metadata: read. CodeBuild uses it only to push the chart bump. When you store it, check the length printed by the command below: a fine-grained token has 93 characters, and a token pasted twice or an expired one makes every push fail with 401.
 
-### 3. ECR, secret, then the token value
+### 3. Apply the stack and store the token
 
 ```bash
 cd terraform/70-pipeline
@@ -572,31 +574,36 @@ cp example.tfvars terraform.tfvars
 terraform init -backend-config=backend.hcl
 terraform apply
 read -rs GITHUB_TOKEN
+echo "length: ${#GITHUB_TOKEN}"
 aws secretsmanager put-secret-value --secret-id lab-commit/github-token \
-  --secret-string "{\"ServerType\":\"GITHUB\",\"AuthType\":\"PERSONAL_ACCESS_TOKEN\",\"Token\":\"$GITHUB_TOKEN\"}"
+  --secret-string "{\"Token\":\"$GITHUB_TOKEN\"}"
 unset GITHUB_TOKEN
 ```
 
-The first apply creates the ECR repositories and the empty secret only (`github_token_ready = false`). The token never passes through Terraform, so it is not in the state file.
+The apply creates the ECR repositories, the secret, the connection in state `PENDING`, the pipeline and the CodeBuild project. The pipeline starts once on creation and fails in Source, because the connection is not authorized yet. The token never passes through Terraform, so it is not in the state file.
 
-### 4. CodeBuild project and webhook
+### 4. Authorize the connection
+
+Open Developer Tools > Settings > Connections in the console, select `lab-commit-github`, choose Update pending connection and install the AWS Connector for GitHub app on `ichcc/lab-commit` only.
 
 ```bash
-terraform apply -var github_token_ready=true
-gh api repos/ichcc/lab-commit/hooks --jq '.[].config.url'
+aws codeconnections get-connection --connection-arn "$(terraform output -raw connection_arn)" \
+  --query Connection.ConnectionStatus
 ```
 
-Set `github_token_ready = true` in `terraform.tfvars` for later applies. Expected: one webhook URL on `codebuild.eu-north-1.amazonaws.com`.
+Expected: `AVAILABLE`. Run `terraform apply` once more so the `connection_status` output is current.
 
-### 5. First build
+### 5. First run
 
 ```bash
-aws codebuild start-build --project-name lab-commit-release
+aws codepipeline start-pipeline-execution --name lab-commit-release
+aws codepipeline list-pipeline-executions --pipeline-name lab-commit-release \
+  --query 'pipelineExecutionSummaries[0].[status,trigger.triggerType]'
 aws logs tail /codebuild/lab-commit --follow
 aws ecr describe-images --repository-name lab/frontend --query 'imageDetails[].imageTags'
 ```
 
-Expected: both images tagged `v1.0.0`. The chart already says `v1.0.0`, so no commit is pushed.
+Expected: the execution ends `Succeeded`, and both images carry the tag in `VERSION`. When the chart already has that version, no commit is pushed.
 
 ### 6. Values and Argo CD bootstrap
 
@@ -622,22 +629,25 @@ kubectl -n lab logs job/seed
 echo v1.0.1 > VERSION
 git commit -am "Bump version to v1.0.1"
 git push
+aws codepipeline list-pipeline-executions --pipeline-name lab-commit-release --max-items 1 \
+  --query 'pipelineExecutionSummaries[0].[status,trigger.triggerType,sourceRevisions[0].revisionSummary]'
 aws logs tail /codebuild/lab-commit --follow
 git pull
 git log -1 --format='%an %s'
 kubectl -n lab rollout status deploy/frontend
 ```
 
-Expected: the build pushes `lab/backend:v1.0.1` and `lab/frontend:v1.0.1`, then commits `Release v1.0.1 [skip ci]` as `Lab-Commit Pipeline`. Argo CD picks it up within 3 minutes (or click Refresh in the UI), and `https://lab-commit-task.lab.internal` on the Windows instance shows `Hello Lab-Commit v1.0.1 <value>`. Exactly one build appears in `aws codebuild list-builds-for-project --project-name lab-commit-release`.
+Expected: the build pushes `lab/backend:v1.0.1` and `lab/frontend:v1.0.1`, then commits `Release v1.0.1 [skip ci]` as `Lab-Commit Pipeline`. Argo CD picks it up within 3 minutes (or click Refresh in the UI), and `https://lab-commit-task.lab.internal` on the Windows instance shows `Hello Lab-Commit v1.0.1 <value>`. Exactly one execution with trigger `WebhookV2` appears for the bump; the release commit starts none.
 
 Troubleshooting:
 
-- `terraform apply -var github_token_ready=true` fails with `Repository not found` or `Could not create webhook`: the token lacks the Webhooks permission, the repository does not exist yet, or the secret value is not the JSON shown above.
+- Source fails with `The connection is not available` or `Unable to use Connection`: the connection is still `PENDING`, or the GitHub app is not installed on the repository. Authorize it (step 4) and choose Release change.
+- A push does not start the pipeline: it did not change `VERSION` or `apps/**`, or it went to another branch. Check `aws codepipeline get-pipeline --name lab-commit-release --query pipeline.triggers`.
 - Build fails at `docker login` or `docker pull`: the CodeBuild security group must allow egress, and the private subnets need the NAT route from stack 10.
 - Build fails with `apps/frontend changed after v1.0.1 was set ... bump VERSION to release it`: a change under `apps/` was pushed without a new `VERSION`. Bump `VERSION` and push.
 - Build log shows `release of v1.0.1 is superseded`: a newer `VERSION` reached the branch during the build, and its own build will update the chart.
-- Build fails with `could not push the release commit`: the branch kept moving for five attempts. Run the build again with `aws codebuild start-build --project-name lab-commit-release`.
-- Build fails at `git push` with 403: the token lacks Contents write, or branch protection blocks pushes from it.
+- Build fails with `could not push the release commit`: the branch kept moving for five attempts. Run the pipeline again with `aws codepipeline start-pipeline-execution --name lab-commit-release`.
+- Build fails at `git push` with 401 or 403: the stored token is wrong or expired (401), or it lacks Contents write, or branch protection blocks it (403). Check the length of the stored token and test it with `curl -H "Authorization: Bearer <token>" https://api.github.com/repos/ichcc/lab-commit`.
 - Argo CD shows `values-aws.yaml: no such file`: run `scripts/render-values.sh`, commit and push.
 - Argo CD shows `ComparisonError` with `required`: a value in `values-aws.yaml` is empty because a Terraform output was missing when the script ran.
 - The page still shows the old version: check `kubectl -n argocd get application lab -o jsonpath='{.status.sync.revision}'` against `git rev-parse HEAD`, and that the image tag exists in ECR.
@@ -747,7 +757,7 @@ The script asks for the exact phrase `destroy lab-commit`, then:
 3. Runs `terraform destroy` in `70-pipeline`, `60-windows`, `50-edge` (with `alb_ready=false`), `40-data`, `30-platform`, `20-eks`, `10-network`.
 4. Deletes the ECR repositories created by this project: repositories under the prefixes of the pull-through cache rules found in the `20-eks` state (`ecr-public/`, `k8s/`, `quay/`), collected before that stack is destroyed, and the `mirror/` repositories named in `scripts/mirror-images.txt`.
 
-The state bucket and budget in `00-bootstrap` stay, so the next session starts quickly. Add `--with-bootstrap` to remove them too. Delete the GitHub token and the repository webhook on GitHub if the lab is over.
+The state bucket and budget in `00-bootstrap` stay, so the next session starts quickly. Add `--with-bootstrap` to remove them too. Revoke the GitHub token and uninstall the AWS Connector for GitHub app if the lab is over.
 
 Troubleshooting:
 

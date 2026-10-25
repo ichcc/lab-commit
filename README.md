@@ -37,24 +37,23 @@ A push that changes `VERSION` or `apps/` starts the CodeBuild release through th
 - A new GitHub repository for this project
 - A region where EKS 1.35 and Fargate are available
 
-The lab runs in `il-central-1` (Tel Aviv). It is an opt-in region, so enable it first in the account settings. CodeConnections is not offered in this region, which shapes the pipeline design in stack 70.
+The lab runs in `eu-north-1` (Stockholm), the region given with the lab account. It is enabled by default, so there is nothing to opt in to.
 
 Verify the region before anything else:
 
 ```bash
-export AWS_REGION=il-central-1
-aws account get-region-opt-status --region-name "$AWS_REGION"
+export AWS_REGION=eu-north-1
 aws eks describe-addon-versions --kubernetes-version 1.35 --region "$AWS_REGION" --query 'addons[0].addonName'
 aws sts get-caller-identity
 ```
 
-Expected: `ENABLED`, an addon name, and your account id.
+Expected: an addon name and your account id.
 
 ## Apply order
 
 | Order | What | Notes |
 |---|---|---|
-| 0 | `scripts/delete-default-vpc.sh` | No-op in `il-central-1`, which has no default VPC in this account |
+| 0 | `scripts/delete-default-vpc.sh` | Removes the default VPC in `eu-north-1`, if it still exists |
 | 1 | `terraform/00-bootstrap` | Local state, creates the state bucket |
 | 2 | `terraform/10-network` | |
 | 3 | `terraform/20-eks` | Then `aws eks update-kubeconfig` |
@@ -240,7 +239,7 @@ Result:
 - RDS PostgreSQL 18, `db.t4g.micro`, 20 GB gp3, encrypted, single AZ, in a DB subnet group over the two private subnets, `publicly_accessible = false`
 - Master password generated and stored by RDS in Secrets Manager (`manage_master_user_password`), never in Terraform state or tfvars
 - Security group `lab-commit-db` that allows port 5432 only from the EKS cluster security group. Fargate pods use that group, so pods can connect and nothing else in the VPC can
-- IAM role `lab-commit-il-central-1-backend` for the `lab/backend` service account (IRSA), allowed only `GetSecretValue` and `DescribeSecret` on the database secret. Pods reach Secrets Manager through the `secretsmanager` interface endpoint
+- IAM role `lab-commit-eu-north-1-backend` for the `lab/backend` service account (IRSA), allowed only `GetSecretValue` and `DescribeSecret` on the database secret. Pods reach Secrets Manager through the `secretsmanager` interface endpoint
 - No table is created here. The Helm chart runs a seed Job that creates `lab_values` and inserts the initial rows idempotently
 
 Outputs used by the chart:
@@ -534,7 +533,7 @@ git push (VERSION or apps/**)
   -> new pods show "Hello Lab-Commit <VERSION> <value>"
 ```
 
-`il-central-1` does not offer CodeConnections, so CodePipeline cannot use GitHub as a source there. CodeBuild connects to GitHub directly with a personal access token kept in Secrets Manager, and its webhook starts the build. That is the same build, push and commit-back flow a CodePipeline with one build stage would run.
+CodeBuild connects to GitHub directly with a personal access token kept in Secrets Manager, and its webhook starts the build, instead of a CodePipeline with a CodeConnections source. That is the same build, push and commit-back flow a CodePipeline with one build stage would run.
 
 The commit-back cannot start a new build, for two independent reasons: the webhook only reacts to changes in `VERSION` or `apps/`, while the commit-back touches only `charts/lab/Chart.yaml`, and the webhook drops commits whose message contains `[skip ci]`. ECR repositories are `IMMUTABLE`, so rebuilding the same version never overwrites an image. When an image tag already exists, the build compares `apps/<service>` with the commit that last changed `VERSION`. If the code is the same it skips the image; if the code changed, the build fails with `bump VERSION to release it`, so a green build never leaves new code undeployed.
 
@@ -587,7 +586,7 @@ terraform apply -var github_token_ready=true
 gh api repos/ichcc/lab-commit/hooks --jq '.[].config.url'
 ```
 
-Set `github_token_ready = true` in `terraform.tfvars` for later applies. Expected: one webhook URL on `codebuild.il-central-1.amazonaws.com`.
+Set `github_token_ready = true` in `terraform.tfvars` for later applies. Expected: one webhook URL on `codebuild.eu-north-1.amazonaws.com`.
 
 ### 5. First build
 
@@ -713,7 +712,7 @@ Troubleshooting:
 
 ## Verification checklist
 
-Run from the workstation unless the line says Windows. `export AWS_REGION=il-central-1` first.
+Run from the workstation unless the line says Windows. `export AWS_REGION=eu-north-1` first.
 
 | Check | Command | Expected |
 |---|---|---|
@@ -725,7 +724,7 @@ Run from the workstation unless the line says Windows. `export AWS_REGION=il-cen
 | Value changes every 5 seconds | Windows PowerShell: `1..6 \| % { (Invoke-WebRequest https://lab-commit-task.lab.internal).Content; Start-Sleep 5 }` | a different value on most lines |
 | Database is private | `aws rds describe-db-instances --db-instance-identifier lab-commit-db --query 'DBInstances[0].[PubliclyAccessible,DBSubnetGroup.Subnets[].SubnetIdentifier]'` | `false`, the two private subnets |
 | Only pods can connect | `aws ec2 describe-security-group-rules --filters Name=group-id,Values="$(terraform -chdir=terraform/40-data output -raw db_security_group_id)" --query 'SecurityGroupRules[?!IsEgress].[FromPort,ReferencedGroupInfo.GroupId]'` | `5432` from the cluster security group only |
-| Only the backend reads the secret | `aws iam get-role --role-name lab-commit-il-central-1-backend --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'` | `system:serviceaccount:lab:backend` |
+| Only the backend reads the secret | `aws iam get-role --role-name lab-commit-eu-north-1-backend --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'` | `system:serviceaccount:lab:backend` |
 | No node groups | `aws eks list-nodegroups --cluster-name lab-commit-eks` | `"nodegroups": []` |
 | Fargate only | `kubectl get nodes -o wide` | every node name starts with `fargate-` |
 | Cluster version | `aws eks describe-cluster --name lab-commit-eks --query cluster.version` | `"1.35"` |
@@ -758,7 +757,7 @@ Troubleshooting:
 
 ## Costs
 
-On-demand prices in `il-central-1`, October 2026, rounded:
+On-demand prices, October 2026, rounded. They were measured in `il-central-1`, which is priced above `eu-north-1`, so treat them as an upper estimate and recheck them before relying on them:
 
 | Item | Hourly | 30 days |
 |---|---|---|

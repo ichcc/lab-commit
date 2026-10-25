@@ -35,7 +35,8 @@ provider "aws" {
 
 provider "helm" {
   kubernetes = {
-    host                   = data.aws_eks_cluster.this.endpoint
+    host                   = var.api_tunnel_port > 0 ? "https://127.0.0.1:${var.api_tunnel_port}" : data.aws_eks_cluster.this.endpoint
+    tls_server_name        = var.api_tunnel_port > 0 ? trimprefix(data.aws_eks_cluster.this.endpoint, "https://") : null
     cluster_ca_certificate = base64decode(data.aws_eks_cluster.this.certificate_authority[0].data)
 
     exec = {

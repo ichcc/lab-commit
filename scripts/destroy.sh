@@ -30,6 +30,13 @@ export KUBECONFIG
 trap 'rm -f "$KUBECONFIG"' EXIT
 
 if aws eks describe-cluster --region "$region" --name "$cluster" >/dev/null 2>&1; then
+  public="$(aws eks describe-cluster --region "$region" --name "$cluster" \
+    --query cluster.resourcesVpcConfig.endpointPublicAccess --output text)"
+  if [[ "$public" != "True" ]]; then
+    echo "the API endpoint of $cluster is private only; re-enable it first:" >&2
+    echo "  terraform -chdir=terraform/20-eks apply -var public_endpoint=true" >&2
+    exit 1
+  fi
   aws eks update-kubeconfig --region "$region" --name "$cluster" --kubeconfig "$KUBECONFIG" >/dev/null
 
   if kubectl get namespace argocd >/dev/null 2>&1; then

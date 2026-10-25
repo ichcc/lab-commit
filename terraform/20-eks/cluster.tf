@@ -49,3 +49,12 @@ resource "aws_vpc_security_group_ingress_rule" "alb_to_pods" {
   to_port                      = tonumber(each.value)
   description                  = "ALB to pods ${each.value}"
 }
+
+resource "aws_vpc_security_group_ingress_rule" "windows_to_api" {
+  security_group_id            = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  referenced_security_group_id = local.windows_sg_id
+  ip_protocol                  = "tcp"
+  from_port                    = 443
+  to_port                      = 443
+  description                  = "Admin tunnel through the Windows instance to the private API endpoint"
+}

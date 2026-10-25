@@ -31,3 +31,8 @@ variable "grafana_image_tag" {
   type    = string
   default = "13.2.4"
 }
+
+variable "api_tunnel_port" {
+  type    = number
+  default = 0
+}

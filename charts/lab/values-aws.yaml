@@ -1,11 +1,11 @@
 image:
-  registry: 788717064995.dkr.ecr.il-central-1.amazonaws.com
+  registry: 788717064995.dkr.ecr.eu-north-1.amazonaws.com
 zone: lab.internal
 backend:
-  roleArn: arn:aws:iam::788717064995:role/lab-commit-il-central-1-backend
+  roleArn: arn:aws:iam::788717064995:role/lab-commit-eu-north-1-backend
 db:
-  host: lab-commit-db.clsagma8yfi1.il-central-1.rds.amazonaws.com
-  secretArn: arn:aws:secretsmanager:il-central-1:788717064995:secret:rds!db-74f0eac8-2215-4d42-a069-3edc2d2900c9-TvmxQ2
+  host: lab-commit-db.cfqwyw8oof87.eu-north-1.rds.amazonaws.com
+  secretArn: arn:aws:secretsmanager:eu-north-1:788717064995:secret:rds!db-0a9c8588-205d-40f3-9872-3284a11cd1aa-fw0jy3
 ingress:
-  certificateArn: arn:aws:acm:il-central-1:788717064995:certificate/16da3c7d-c7fc-4aba-880e-262b5d3753bb
-  securityGroupId: sg-0782781fafddb57dd
+  certificateArn: arn:aws:acm:eu-north-1:788717064995:certificate/0786efa1-7b20-4cc5-9853-11a13d6bb86c
+  securityGroupId: sg-0bce74d73839981f6

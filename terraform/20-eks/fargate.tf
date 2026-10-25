@@ -57,9 +57,15 @@ resource "aws_eks_fargate_profile" "ns" {
   depends_on = [aws_iam_role_policy_attachment.fargate]
 }
 
+data "aws_eks_addon_version" "coredns" {
+  addon_name         = "coredns"
+  kubernetes_version = aws_eks_cluster.this.version
+}
+
 resource "aws_eks_addon" "coredns" {
   cluster_name                = aws_eks_cluster.this.name
   addon_name                  = "coredns"
+  addon_version               = data.aws_eks_addon_version.coredns.version
   resolve_conflicts_on_create = "OVERWRITE"
   resolve_conflicts_on_update = "OVERWRITE"
 

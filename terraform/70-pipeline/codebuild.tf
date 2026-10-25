@@ -21,24 +21,18 @@ resource "aws_vpc_security_group_egress_rule" "codebuild_all" {
 }
 
 resource "aws_codebuild_project" "release" {
-  count = var.github_token_ready ? 1 : 0
-
   name          = "${var.project}-release"
   description   = "Build images, push to ECR, bump the chart appVersion"
   service_role  = aws_iam_role.codebuild.arn
   build_timeout = 30
 
   source {
-    type            = "GITHUB"
-    location        = local.repository_url
-    git_clone_depth = 0
-    buildspec       = "pipeline/buildspec.yml"
+    type      = "CODEPIPELINE"
+    buildspec = "pipeline/buildspec.yml"
   }
 
-  source_version = var.branch
-
   artifacts {
-    type = "NO_ARTIFACTS"
+    type = "CODEPIPELINE"
   }
 
   environment {
@@ -81,35 +75,10 @@ resource "aws_codebuild_project" "release" {
     }
   }
 
-  depends_on = [aws_codebuild_source_credential.github, aws_iam_role_policy.codebuild]
+  depends_on = [aws_iam_role_policy.codebuild]
 }
 
-resource "aws_codebuild_webhook" "release" {
-  count = var.github_token_ready ? 1 : 0
-
-  project_name = aws_codebuild_project.release[0].name
-  build_type   = "BUILD"
-
-  filter_group {
-    filter {
-      type    = "EVENT"
-      pattern = "PUSH"
-    }
-
-    filter {
-      type    = "HEAD_REF"
-      pattern = "^refs/heads/${var.branch}$"
-    }
-
-    filter {
-      type    = "FILE_PATH"
-      pattern = "^(VERSION|apps/.*)$"
-    }
-
-    filter {
-      type                    = "COMMIT_MESSAGE"
-      pattern                 = "\\[skip ci\\]"
-      exclude_matched_pattern = true
-    }
-  }
+moved {
+  from = aws_codebuild_project.release[0]
+  to   = aws_codebuild_project.release
 }

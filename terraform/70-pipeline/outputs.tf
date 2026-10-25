@@ -7,9 +7,17 @@ output "github_secret_arn" {
 }
 
 output "codebuild_project" {
-  value = var.github_token_ready ? aws_codebuild_project.release[0].name : null
+  value = aws_codebuild_project.release.name
 }
 
-output "webhook_url" {
-  value = var.github_token_ready ? aws_codebuild_webhook.release[0].payload_url : null
+output "pipeline_name" {
+  value = aws_codepipeline.release.name
+}
+
+output "connection_arn" {
+  value = aws_codestarconnections_connection.github.arn
+}
+
+output "connection_status" {
+  value = aws_codestarconnections_connection.github.connection_status
 }

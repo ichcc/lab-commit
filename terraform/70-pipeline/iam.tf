@@ -62,6 +62,16 @@ data "aws_iam_policy_document" "codebuild" {
   }
 
   statement {
+    actions   = ["codestar-connections:UseConnection", "codeconnections:UseConnection"]
+    resources = [aws_codestarconnections_connection.github.arn]
+  }
+
+  statement {
+    actions   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject"]
+    resources = ["${aws_s3_bucket.artifacts.arn}/*"]
+  }
+
+  statement {
     actions = [
       "ec2:CreateNetworkInterface",
       "ec2:DeleteNetworkInterface",
@@ -96,4 +106,49 @@ resource "aws_iam_role_policy" "codebuild" {
   name   = "codebuild"
   role   = aws_iam_role.codebuild.id
   policy = data.aws_iam_policy_document.codebuild.json
+}
+
+data "aws_iam_policy_document" "codepipeline_assume" {
+  statement {
+    actions = ["sts:AssumeRole"]
+
+    principals {
+      type        = "Service"
+      identifiers = ["codepipeline.amazonaws.com"]
+    }
+
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceAccount"
+      values   = [local.account_id]
+    }
+  }
+}
+
+resource "aws_iam_role" "codepipeline" {
+  name               = "${var.project}-${var.region}-codepipeline"
+  assume_role_policy = data.aws_iam_policy_document.codepipeline_assume.json
+}
+
+data "aws_iam_policy_document" "codepipeline" {
+  statement {
+    actions   = ["codestar-connections:UseConnection", "codeconnections:UseConnection"]
+    resources = [aws_codestarconnections_connection.github.arn]
+  }
+
+  statement {
+    actions   = ["s3:GetObject", "s3:GetObjectVersion", "s3:PutObject", "s3:GetBucketVersioning"]
+    resources = [aws_s3_bucket.artifacts.arn, "${aws_s3_bucket.artifacts.arn}/*"]
+  }
+
+  statement {
+    actions   = ["codebuild:BatchGetBuilds", "codebuild:StartBuild"]
+    resources = [aws_codebuild_project.release.arn]
+  }
+}
+
+resource "aws_iam_role_policy" "codepipeline" {
+  name   = "codepipeline"
+  role   = aws_iam_role.codepipeline.id
+  policy = data.aws_iam_policy_document.codepipeline.json
 }

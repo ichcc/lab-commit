@@ -33,8 +33,3 @@ variable "build_image" {
   type    = string
   default = "aws/codebuild/amazonlinux-x86_64-standard:5.0"
 }
-
-variable "github_token_ready" {
-  type    = bool
-  default = false
-}

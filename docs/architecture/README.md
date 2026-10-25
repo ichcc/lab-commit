@@ -27,7 +27,7 @@ The AWS boundary is a logical service grouping. ECR and the EKS control plane ar
 To keep the overview readable, some relationships are explained here and in the diagram cards rather than drawn:
 
 - Argo CD syncs `charts/lab` into namespace `lab`, with automated prune/self-heal. It reaches GitHub through fck-nat. Its configured GitOps repository is `ichcc/lab-commit`.
-- CodeBuild pushes VERSION-tagged images to ECR and commits Chart.yaml changes to GitHub using `[skip ci]`. Webhooks accept pushes changing `VERSION` or `apps/` and exclude that release commit. CodeBuild/source credentials require `github_token_ready=true`.
+- CodeBuild pushes VERSION-tagged images to ECR and commits Chart.yaml changes to GitHub using `[skip ci]`. A CodePipeline V2 trigger on the CodeConnections source accepts pushes changing `VERSION` or `apps/**`, so that release commit starts no run. The connection is authorized once in the console.
 - Fargate pulls application images and platform cache/mirror images through ECR endpoints; S3 uses the gateway endpoint. The frontend itself does not perform image pulls.
 - Windows uses SSM/Fleet Manager and private DNS to access the internal ALB. ALB terminates ACM TLS, redirects port 80, and serves frontend, Argo CD and Grafana. DNS ALB aliases require `alb_ready=true`.
 - Backend and the seed Job use the backend service account/IRSA to fetch the RDS-managed password from Secrets Manager. Only EKS cluster security-group traffic is permitted on database port 5432.

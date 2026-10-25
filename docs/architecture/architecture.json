@@ -360,7 +360,7 @@
       "id": "github-codebuild",
       "from": "github",
       "to": "codebuild",
-      "label": "push webhook",
+      "label": "CodePipeline",
       "labelAt": [
         1086,
         583
@@ -427,7 +427,7 @@
       "title": "Network & delivery",
       "items": [
         "Public subnet: fck-nat t4g.micro + internet gateway. Private outbound GitHub traffic uses NAT; AWS APIs use interface endpoints and S3 gateway.",
-        "CodeBuild requires github_token_ready. Release updates Chart.yaml with [skip ci]; ECR cache/mirrors serve platform images."
+        "CodePipeline trigger filters VERSION and apps/**. Release updates Chart.yaml with [skip ci]; ECR cache/mirrors serve platform images."
       ]
     },
     {

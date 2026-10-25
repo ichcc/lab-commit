@@ -5041,7 +5041,7 @@
         <path data-edge-from="alb" data-edge-to="frontend" data-edge-label="HTTP :8080" data-edge-key="1" data-edge-id="alb-frontend" data-composition-points="510,152;590,152" d="M 510 152 L 590 152" class="a-default" data-animate="edge" style="--step:1" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="frontend" data-edge-to="backend" data-edge-label="GET /value" data-edge-key="2" data-edge-id="frontend-backend" data-composition-points="770,152;850,152" d="M 770 152 L 850 152" class="a-default" data-animate="edge" style="--step:2" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="backend" data-edge-to="rds" data-edge-label="TLS :5432" data-edge-key="3" data-edge-id="backend-rds" data-composition-points="1030,152;1110,152" d="M 1030 152 L 1110 152" class="a-default" data-animate="edge" style="--step:3" stroke-width="1.5" marker-end="url(#arrowhead)"/>
-        <path data-edge-from="github" data-edge-to="codebuild" data-edge-label="push webhook" data-edge-key="4" data-edge-id="github-codebuild" data-composition-points="770,652;1086,652;1086,412;1110,412" d="M 770 652 L 1078 652 Q 1086 652 1086 644 L 1086 420 Q 1086 412 1094 412 L 1110 412" class="a-default" data-animate="edge" style="--step:4" stroke-width="1.5" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="github" data-edge-to="codebuild" data-edge-label="CodePipeline" data-edge-key="4" data-edge-id="github-codebuild" data-composition-points="770,652;1086,652;1086,412;1110,412" d="M 770 652 L 1078 652 Q 1086 652 1086 644 L 1086 420 Q 1086 412 1094 412 L 1110 412" class="a-default" data-animate="edge" style="--step:4" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="codebuild" data-edge-to="ecr" data-edge-label="push VERSION" data-edge-key="5" data-edge-id="codebuild-ecr" data-composition-points="1200,449;1200,495" d="M 1200 449 L 1200 495" class="a-default" data-animate="edge" style="--step:5" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="argocd" data-edge-to="github" data-edge-label="poll chart" data-edge-key="6" data-edge-id="argocd-github" data-composition-points="680,449;680,615" d="M 680 449 L 680 615" class="a-default" data-animate="edge" style="--step:6" stroke-width="1.5" marker-end="url(#arrowhead)"/>
         <path data-edge-from="grafana" data-edge-to="prometheus" data-edge-label="PromQL" data-edge-key="7" data-edge-id="grafana-prometheus" data-composition-points="940,375;940,319" d="M 940 375 L 940 319" class="a-default" data-animate="edge" style="--step:7" stroke-width="1.5" marker-end="url(#arrowhead)"/>
@@ -5207,9 +5207,9 @@
           <rect x="1043.4" y="132" width="53.199999999999996" height="14" rx="3" class="c-mask"/>
           <text x="1070" y="142" class="t-muted" font-size="8" text-anchor="middle">TLS :5432</text>
         </g>
-        <g data-detail="context" data-edge-from="github" data-edge-to="codebuild" data-edge-label="push webhook" data-edge-key="4" data-edge-id="github-codebuild">
+        <g data-detail="context" data-edge-from="github" data-edge-to="codebuild" data-edge-label="CodePipeline" data-edge-key="4" data-edge-id="github-codebuild">
           <rect x="1052.2" y="573" width="67.6" height="14" rx="3" class="c-mask"/>
-          <text x="1086" y="583" class="t-muted" font-size="8" text-anchor="middle">push webhook</text>
+          <text x="1086" y="583" class="t-muted" font-size="8" text-anchor="middle">CodePipeline</text>
         </g>
         <g data-detail="context" data-edge-from="codebuild" data-edge-to="ecr" data-edge-label="push VERSION" data-edge-key="5" data-edge-id="codebuild-ecr">
           <rect x="1166.2" y="453" width="67.6" height="14" rx="3" class="c-mask"/>
@@ -5458,7 +5458,7 @@
         </div>
         <ul>
           <li>&bull; Public subnet: fck-nat t4g.micro + internet gateway. Private outbound GitHub traffic uses NAT; AWS APIs use interface endpoints and S3 gateway.</li>
-          <li>&bull; CodeBuild requires github_token_ready. Release updates Chart.yaml with [skip ci]; ECR cache/mirrors serve platform images.</li>
+          <li>&bull; CodePipeline trigger filters VERSION and apps/**. Release updates Chart.yaml with [skip ci]; ECR cache/mirrors serve platform images.</li>
         </ul>
       </div>
 

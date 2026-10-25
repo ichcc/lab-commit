@@ -741,8 +741,9 @@ At the end k6 prints a summary. Expected: `http_req_failed` below 5 percent and 
 |---|---|---|---|---|---|
 | 2026-10-23, `il-central-1` | 18 060 | 0 | 3.95 ms | 1 to 4 in 4 min | by 12:54 |
 | 2026-10-25, `eu-north-1`, release `v1.0.3` rolled out during the ramp | 18 030 | 111 (0.61 %) | 3.67 ms | 1 to 4 in 2.5 min | 13:38, about 1.5 min after k6 finished |
+| 2026-10-25, `eu-north-1`, private API endpoint, release `v1.0.4` rolled out during the hold, with readiness gates, `preStop` and a 30 s deregistration delay | 18 059 | 0 | 3.61 ms | 1 to 4 in 3 min | 14:54, about 1 min after k6 finished |
 
-All 111 failures in the second run came from the ALB (`HTTPCode_ELB_504_Count` 80, `HTTPCode_ELB_502_Count` 31) in the two minutes after the `v1.0.3` ReplicaSet was created, and none from the pods (`HTTPCode_Target_5XX_Count` stayed empty). The ALB kept sending requests to frontend pods that were already stopping. The readiness gates, the `preStop` sleep and the shorter deregistration delay in the chart address this; check the ALB metrics for the test window:
+All 111 failures in the second run came from the ALB (`HTTPCode_ELB_504_Count` 80, `HTTPCode_ELB_502_Count` 31) in the two minutes after the `v1.0.3` ReplicaSet was created, and none from the pods (`HTTPCode_Target_5XX_Count` stayed empty). The ALB kept sending requests to frontend pods that were already stopping. The readiness gates, the `preStop` sleep and the shorter deregistration delay in the chart fix this: in the third run all four frontend pods were replaced at 40 requests per second and the ALB returned no 5xx. Check the ALB metrics for the test window:
 
 ```bash
 LB="$(aws elbv2 describe-load-balancers --query 'LoadBalancers[?starts_with(LoadBalancerName,`k8s-labcommit`)].LoadBalancerArn' --output text | sed 's|.*:loadbalancer/||')"

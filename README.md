@@ -8,7 +8,7 @@ Private EKS (Fargate only) platform on AWS, built with Terraform. Work is split 
 |---|---|---|
 | 00-bootstrap | State bucket, budget alarms | done |
 | 10-network | VPC, 2 private subnets, endpoints, security groups | done |
-| 20-eks | Cluster 1.35, Fargate profiles, IRSA, ECR pull-through cache | done |
+| 20-eks | Cluster 1.36, Fargate profiles, IRSA, ECR pull-through cache | done |
 | 30-platform | Load Balancer Controller, Argo CD, KEDA, Prometheus, Grafana | done |
 | 40-data | RDS PostgreSQL, database secret, backend IRSA role | done |
 | 50-edge | Self-signed CA and certificate in ACM, private Route53 zone, ALB records | done |
@@ -35,7 +35,7 @@ A push that changes `VERSION` or `apps/` starts the CodePipeline release through
 - AWS CLI v2, Terraform >= 1.10, kubectl, Helm 3, Docker, Git
 - AWS credentials with a privileged role assumed in the console or CLI
 - A new GitHub repository for this project
-- A region where EKS 1.35 and Fargate are available
+- A region where EKS 1.36 and Fargate are available
 
 The lab runs in `eu-north-1` (Stockholm), the region given with the lab account. It is enabled by default, so there is nothing to opt in to.
 
@@ -43,7 +43,7 @@ Verify the region before anything else:
 
 ```bash
 export AWS_REGION=eu-north-1
-aws eks describe-addon-versions --kubernetes-version 1.35 --region "$AWS_REGION" --query 'addons[0].addonName'
+aws eks describe-addon-versions --kubernetes-version 1.36 --region "$AWS_REGION" --query 'addons[0].addonName'
 aws sts get-caller-identity
 ```
 
@@ -140,7 +140,7 @@ kubectl get pods -A
 
 Result:
 
-- Cluster `lab-commit-eks`, Kubernetes 1.35, API authentication mode `API`, creator has admin
+- Cluster `lab-commit-eks`, Kubernetes 1.36, API authentication mode `API`, creator has admin
 - No node groups. One Fargate profile per namespace: `default`, `kube-system`, `argocd`, `keda`, `monitoring`, `lab`
 - CoreDNS addon configured to run on Fargate
 - OIDC provider for IRSA (EKS Pod Identity is not supported on Fargate)
@@ -320,7 +320,8 @@ The pipeline in stack 70 builds and pushes both images to the `lab/backend` and 
 | Services | ClusterIP only. The backend has no Ingress |
 | ServiceAccounts | `backend` carries the IRSA annotation `backend.roleArn`. `frontend` has no token mounted |
 | Job `seed` | Argo CD `Sync` hook in sync wave `-1`, after the `backend` ServiceAccount (wave `-2`) and before the Deployments, Services and Ingresses (wave 0). The frontend reports ready only with a value from the backend, so the table must exist before the Deployments are checked for health; a PostSync hook would wait for a healthy frontend and never run on an empty database. The Helm `post-install,post-upgrade` annotations stay for a plain `helm install`, and Argo CD ignores them because the Argo CD hook annotation is present. Uses the backend image and service account |
-| Ingress `frontend` | Internal ALB, `target-type: ip`, group `lab-commit`, ports 80 and 443 with redirect to 443, ACM certificate, host `lab-commit-task.<zone>` |
+| Ingress `frontend` | Internal ALB, `target-type: ip`, group `lab-commit`, ports 80 and 443 with redirect to 443, ACM certificate, TLS policy `ELBSecurityPolicy-TLS13-1-2-Res-2021-06` (TLS 1.2 and 1.3 only, shared by the whole group), deregistration delay 30 s, host `lab-commit-task.<zone>` |
+| Rollouts without ALB errors | The `lab` namespace carries `elbv2.k8s.aws/pod-readiness-gate-inject: enabled` (set by the Argo CD Application), so a new frontend pod counts as ready only after the ALB reports its target healthy. Frontend pods sleep 15 s in `preStop`, so the ALB stops sending requests before the process exits |
 | Ingresses `argocd`, `grafana` | Same ALB group, created in the `argocd` and `monitoring` namespaces, hosts `argocd.<zone>` and `grafana.<zone>` |
 | ScaledObject `frontend` | Prometheus trigger `sum(rate(http_requests_total{namespace="lab"}[1m]))`, `AverageValue` 10, 1 to 4 replicas, `cooldownPeriod` 60, scale-down stabilization 60 s and at most one pod every 30 s |
 
@@ -722,7 +723,7 @@ At the end k6 prints a summary. Expected: `http_req_failed` below 5 percent and 
 | 2026-10-23, `il-central-1` | 18 060 | 0 | 3.95 ms | 1 to 4 in 4 min | by 12:54 |
 | 2026-10-25, `eu-north-1`, release `v1.0.3` rolled out during the ramp | 18 030 | 111 (0.61 %) | 3.67 ms | 1 to 4 in 2.5 min | 13:38, about 1.5 min after k6 finished |
 
-All 111 failures in the second run came from the ALB (`HTTPCode_ELB_504_Count` 80, `HTTPCode_ELB_502_Count` 31) in the two minutes after the `v1.0.3` ReplicaSet was created, and none from the pods (`HTTPCode_Target_5XX_Count` stayed empty). The ALB kept sending requests to frontend pods that were already stopping. Avoid releases during a load test, or check the ALB metrics for the test window:
+All 111 failures in the second run came from the ALB (`HTTPCode_ELB_504_Count` 80, `HTTPCode_ELB_502_Count` 31) in the two minutes after the `v1.0.3` ReplicaSet was created, and none from the pods (`HTTPCode_Target_5XX_Count` stayed empty). The ALB kept sending requests to frontend pods that were already stopping. The readiness gates, the `preStop` sleep and the shorter deregistration delay in the chart address this; check the ALB metrics for the test window:
 
 ```bash
 LB="$(aws elbv2 describe-load-balancers --query 'LoadBalancers[?starts_with(LoadBalancerName,`k8s-labcommit`)].LoadBalancerArn' --output text | sed 's|.*:loadbalancer/||')"
@@ -755,7 +756,7 @@ Run from the workstation unless the line says Windows. `export AWS_REGION=eu-nor
 | Only the backend reads the secret | `aws iam get-role --role-name lab-commit-eu-north-1-backend --query 'Role.AssumeRolePolicyDocument.Statement[0].Condition'` | `system:serviceaccount:lab:backend` |
 | No node groups | `aws eks list-nodegroups --cluster-name lab-commit-eks` | `"nodegroups": []` |
 | Fargate only | `kubectl get nodes -o wide` | every node name starts with `fargate-` |
-| Cluster version | `aws eks describe-cluster --name lab-commit-eks --query cluster.version` | `"1.35"` |
+| Cluster version | `aws eks describe-cluster --name lab-commit-eks --query cluster.version` | `"1.36"` |
 | Monitoring | Grafana dashboard `Lab-Commit` | CPU, memory and pod count panels for `frontend` and `backend` |
 | Autoscaling | `./scripts/run-loadgen.sh "$AWS_REGION"` and `kubectl -n lab get pods -l app.kubernetes.io/name=frontend -w` | 1 to 4 pods during the hold, back to 1 a few minutes after the ramp down |
 | Pipeline | release `v1.0.1` as in step 10 | `Hello Lab-Commit v1.0.1 <value>` |

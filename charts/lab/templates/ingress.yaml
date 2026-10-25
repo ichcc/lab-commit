@@ -10,6 +10,7 @@ metadata:
     {{- include "lab.albAnnotations" . | nindent 4 }}
     alb.ingress.kubernetes.io/group.order: "10"
     alb.ingress.kubernetes.io/healthcheck-path: /healthz
+    alb.ingress.kubernetes.io/target-group-attributes: {{ printf "deregistration_delay.timeout_seconds=%v" .Values.ingress.deregistrationDelaySeconds }}
 spec:
   ingressClassName: {{ .Values.ingress.className }}
   rules:

@@ -11,6 +11,8 @@ frontend:
   port: 8080
   pollSeconds: 5
   staleSeconds: 30
+  preStopSeconds: 15
+  terminationGracePeriodSeconds: 30
   resources:
     requests:
       cpu: 250m
@@ -52,6 +54,8 @@ ingress:
   enabled: true
   className: alb
   groupName: lab-commit
+  sslPolicy: ELBSecurityPolicy-TLS13-1-2-Res-2021-06
+  deregistrationDelaySeconds: 30
   certificateArn: ""
   securityGroupId: ""
   host: lab-commit-task

@@ -45,6 +45,7 @@ alb.ingress.kubernetes.io/target-type: ip
 alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.groupName }}
 alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
 alb.ingress.kubernetes.io/ssl-redirect: "443"
+alb.ingress.kubernetes.io/ssl-policy: {{ .Values.ingress.sslPolicy }}
 alb.ingress.kubernetes.io/certificate-arn: {{ required "ingress.certificateArn is required" .Values.ingress.certificateArn }}
 {{- with .Values.ingress.securityGroupId }}
 alb.ingress.kubernetes.io/security-groups: {{ . }}

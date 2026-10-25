@@ -1,1 +1,1 @@
-region = "il-central-1"
+region = "eu-north-1"

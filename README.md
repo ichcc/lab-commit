@@ -63,6 +63,7 @@ Expected: an addon name and your account id.
 | 7 | Tests and chart check | Local only |
 | 8 | `terraform/50-edge`, phase one | Certificate and zone |
 | 9 | `terraform/60-windows` | Stage the Chrome installer first |
+| 9a | `terraform/20-eks` with `public_endpoint = false` | From here on, `scripts/eks-tunnel.sh` for kubectl and stack 30 |
 | 10 | GitHub repository, `terraform/70-pipeline`, first build, `scripts/render-values.sh`, `kubectl apply -f gitops/root.yaml` | Argo CD creates the ALB |
 | 10a | `terraform/50-edge`, phase two | `alb_ready=true` |
 | 11 | `scripts/run-loadgen.sh` | Autoscaling demo |
@@ -145,7 +146,7 @@ Result:
 - CoreDNS addon configured to run on Fargate
 - OIDC provider for IRSA (EKS Pod Identity is not supported on Fargate)
 - ECR pull-through cache rules: `ecr-public/`, `k8s/`, `quay/`. Docker Hub and GHCR need registry credentials in Secrets Manager and are not configured
-- Cluster security group accepts the ALB security group on ports 80, 3000, 8000, 8080, 9090 only
+- Cluster security group accepts the ALB security group on ports 80, 3000, 8000, 8080, 9090 only, and the Windows security group on 443 for the admin tunnel to the private API endpoint
 
 Image paths for later stacks follow this pattern:
 
@@ -162,7 +163,25 @@ CoreDNS can stay in Pending for a few minutes after the Fargate profile is creat
 kubectl -n kube-system rollout restart deployment coredns
 ```
 
-To lock the API down at the end of the lab set `public_endpoint = false` and re-apply from a host inside the VPC.
+### Private API endpoint
+
+The private endpoint is always on. The public one is on during the build, limited to `admin_cidrs`, because the Windows instance that carries the tunnel only exists from step 9. After step 9 close it and work through the tunnel:
+
+```bash
+echo 'public_endpoint = false' >> terraform.tfvars
+terraform apply
+```
+
+Open the tunnel in a separate terminal and keep it running. It forwards `127.0.0.1:8443` through the Windows instance (SSM, no inbound ports) to the private endpoint and writes `~/.kube/lab-commit-tunnel`, whose server is `https://127.0.0.1:8443` with `tls-server-name` set to the real endpoint host, so the certificate still verifies:
+
+```bash
+./scripts/eks-tunnel.sh "$AWS_REGION"
+export KUBECONFIG=~/.kube/lab-commit-tunnel
+kubectl get nodes
+terraform -chdir=terraform/30-platform plan -var api_tunnel_port=8443
+```
+
+Expected: `aws eks describe-cluster --name lab-commit-eks --query cluster.resourcesVpcConfig.endpointPublicAccess` is `false`, the endpoint host resolves to private addresses only, `kubectl` with the normal kubeconfig times out, and `kubectl` through the tunnel lists the nodes. Stacks 40 to 70 do not talk to the Kubernetes API and need no tunnel. `scripts/run-loadgen.sh` uses the current `KUBECONFIG`, so export the tunnel kubeconfig first. The tunnel needs the Session Manager plugin for the AWS CLI and a running Windows instance.
 
 ## Step 4: mirror images that the pull-through cache cannot serve
 
@@ -184,7 +203,7 @@ terraform init -backend-config=backend.hcl
 terraform apply
 ```
 
-Terraform runs Helm from your workstation, so the EKS public endpoint must still allow your IP (`admin_cidrs` in stack 20) and `aws` must be on `PATH` for token generation. Charts download from the public Helm repositories on your machine. Images come from ECR.
+Terraform runs Helm from your workstation, so the EKS public endpoint must still allow your IP (`admin_cidrs` in stack 20), or the tunnel must be open and `-var api_tunnel_port=8443` set once the endpoint is private, and `aws` must be on `PATH` for token generation. Charts download from the public Helm repositories on your machine. Images come from ECR.
 
 Installed releases:
 
@@ -757,6 +776,8 @@ Run from the workstation unless the line says Windows. `export AWS_REGION=eu-nor
 | No node groups | `aws eks list-nodegroups --cluster-name lab-commit-eks` | `"nodegroups": []` |
 | Fargate only | `kubectl get nodes -o wide` | every node name starts with `fargate-` |
 | Cluster version | `aws eks describe-cluster --name lab-commit-eks --query cluster.version` | `"1.36"` |
+| API not public | `aws eks describe-cluster --name lab-commit-eks --query 'cluster.resourcesVpcConfig.[endpointPublicAccess,endpointPrivateAccess]'` | `false`, `true` |
+| ALB TLS policy | `aws elbv2 describe-listeners --load-balancer-arn <alb-arn> --query 'Listeners[].[Port,SslPolicy]'` | 443 with `ELBSecurityPolicy-TLS13-1-2-Res-2021-06`, 80 redirects |
 | Monitoring | Grafana dashboard `Lab-Commit` | CPU, memory and pod count panels for `frontend` and `backend` |
 | Autoscaling | `./scripts/run-loadgen.sh "$AWS_REGION"` and `kubectl -n lab get pods -l app.kubernetes.io/name=frontend -w` | 1 to 4 pods during the hold, back to 1 a few minutes after the ramp down |
 | Pipeline | release `v1.0.1` as in step 10 | `Hello Lab-Commit v1.0.1 <value>` |
@@ -764,10 +785,11 @@ Run from the workstation unless the line says Windows. `export AWS_REGION=eu-nor
 ## Teardown
 
 ```bash
+terraform -chdir=terraform/20-eks apply -var public_endpoint=true
 ./scripts/destroy.sh "$AWS_REGION"
 ```
 
-The script writes a temporary kubeconfig for the cluster `lab-commit-eks` in the given region, so the current `kubectl` context does not matter and no other cluster is touched.
+The script needs the public endpoint, because it destroys the Windows instance that carries the tunnel before it reaches stack 30. It stops with a hint when the endpoint is private. It writes a temporary kubeconfig for the cluster `lab-commit-eks` in the given region, so the current `kubectl` context does not matter and no other cluster is touched.
 
 The script asks for the exact phrase `destroy lab-commit`, then:
 
@@ -780,7 +802,7 @@ The state bucket and budget in `00-bootstrap` stay, so the next session starts q
 
 Troubleshooting:
 
-- `kubectl get ingress` fails with a timeout: the API endpoint allows only `admin_cidrs` from stack 20, and your current IP is not in it. Update `admin_cidrs`, apply stack 20 and run the script again.
+- `kubectl get ingress` fails with a timeout: the API endpoint allows only `admin_cidrs` from stack 20, and your current IP is not in it, or the public endpoint is still off. Update `admin_cidrs`, apply stack 20 with `public_endpoint=true` and run the script again.
 - `load balancers still exist`: an Ingress outside the `lab-commit` group, or one with a stuck finalizer, still owns the ALB. `kubectl get ingress -A` and `kubectl -n kube-system logs deploy/aws-load-balancer-controller`.
 - A stack fails halfway: fix the cause and run the script again. Finished stacks have empty state and are skipped quickly. If `20-eks` was already destroyed in an earlier run, the cache rules are gone from its state and the script cannot attribute the cache repositories any more: list them with `aws ecr describe-repositories --query 'repositories[].repositoryName'` and delete the `ecr-public/`, `k8s/` and `quay/` ones by hand after checking that nobody else uses them.
 

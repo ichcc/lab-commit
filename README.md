@@ -584,7 +584,7 @@ The apply creates the ECR repositories, the secret, the connection in state `PEN
 
 ### 4. Authorize the connection
 
-Open Developer Tools > Settings > Connections in the console, select `lab-commit-github`, choose Update pending connection and install the AWS Connector for GitHub app on `ichcc/lab-commit` only.
+Open Developer Tools > Settings > Connections in the console, select `lab-commit-github`, choose Update pending connection, then Install a new app on the account that owns the repository (`ichcc`) for `lab-commit` only. Authorizing the app for your user is not enough: it must appear under Installed GitHub Apps on that account, or pushes will not start the pipeline.
 
 ```bash
 aws codeconnections get-connection --connection-arn "$(terraform output -raw connection_arn)" \
@@ -639,8 +639,11 @@ kubectl -n lab rollout status deploy/frontend
 
 Expected: the build pushes `lab/backend:v1.0.1` and `lab/frontend:v1.0.1`, then commits `Release v1.0.1 [skip ci]` as `Lab-Commit Pipeline`. Argo CD picks it up within 3 minutes (or click Refresh in the UI), and `https://lab-commit-task.lab.internal` on the Windows instance shows `Hello Lab-Commit v1.0.1 <value>`. Exactly one execution with trigger `WebhookV2` appears for the bump; the release commit starts none.
 
+Verified on 2026-10-25 with `v1.0.3`: the push started execution `86bef578` with trigger `WebhookV2`, the build pushed both images and the commit `Release v1.0.3 [skip ci]`, no second execution started, and Argo CD rolled out `lab/frontend:v1.0.3` within 4 minutes. Use the next free version when you repeat the demo; the build refuses to rebuild an existing tag from changed code.
+
 Troubleshooting:
 
+- A push does not start the pipeline although Source works when started by hand: the AWS Connector for GitHub app is authorized for your user but not installed on the account that owns the repository. A public repository can be cloned through any installation, but push events reach only an installation on the owner. Check the Installed GitHub Apps tab (not Authorized GitHub Apps) at https://github.com/settings/installations. An `AVAILABLE` connection cannot switch installations, so replace it with `terraform apply -replace=aws_codestarconnections_connection.github`, install the app on the owner account first (https://github.com/apps/aws-connector-for-github/installations/new, only `lab-commit`), then pick that installation when you authorize the new connection.
 - Source fails with `The connection is not available` or `Unable to use Connection`: the connection is still `PENDING`, or the GitHub app is not installed on the repository. Authorize it (step 4) and choose Release change.
 - A push does not start the pipeline: it did not change `VERSION` or `apps/**`, or it went to another branch. Check `aws codepipeline get-pipeline --name lab-commit-release --query pipeline.triggers`.
 - Build fails at `docker login` or `docker pull`: the CodeBuild security group must allow egress, and the private subnets need the NAT route from stack 10.
@@ -711,6 +714,21 @@ kubectl -n lab logs -f job/k6-load
 In Grafana (`https://grafana.lab.internal` from the Windows instance, or `kubectl -n monitoring port-forward svc/grafana 3000:80`), open the `Lab-Commit` dashboard: the request rate panel climbs to about 40 per second, the frontend replica panel steps from 1 to 4 and back, and the CPU and memory panels show one line per pod.
 
 At the end k6 prints a summary. Expected: `http_req_failed` below 5 percent and both checks above 95 percent. A few failures during scale-up are normal while new pods register with the ALB.
+
+### Measured runs
+
+| Run | Requests | Failed | p95 | Scale up | Back to 1 pod |
+|---|---|---|---|---|---|
+| 2026-10-23, `il-central-1` | 18 060 | 0 | 3.95 ms | 1 to 4 in 4 min | by 12:54 |
+| 2026-10-25, `eu-north-1`, release `v1.0.3` rolled out during the ramp | 18 030 | 111 (0.61 %) | 3.67 ms | 1 to 4 in 2.5 min | 13:38, about 1.5 min after k6 finished |
+
+All 111 failures in the second run came from the ALB (`HTTPCode_ELB_504_Count` 80, `HTTPCode_ELB_502_Count` 31) in the two minutes after the `v1.0.3` ReplicaSet was created, and none from the pods (`HTTPCode_Target_5XX_Count` stayed empty). The ALB kept sending requests to frontend pods that were already stopping. Avoid releases during a load test, or check the ALB metrics for the test window:
+
+```bash
+LB="$(aws elbv2 describe-load-balancers --query 'LoadBalancers[?starts_with(LoadBalancerName,`k8s-labcommit`)].LoadBalancerArn' --output text | sed 's|.*:loadbalancer/||')"
+aws cloudwatch get-metric-statistics --namespace AWS/ApplicationELB --metric-name HTTPCode_ELB_5XX_Count \
+  --dimensions Name=LoadBalancer,Value="$LB" --start-time <start> --end-time <end> --period 60 --statistics Sum
+```
 
 Troubleshooting:
 

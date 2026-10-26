@@ -41,16 +41,6 @@ variable "public_subnet_cidr" {
   default = "10.20.0.0/24"
 }
 
-variable "public_alb_subnet_cidr" {
-  type    = string
-  default = "10.20.3.0/24"
-}
-
-variable "admin_cidrs" {
-  type    = list(string)
-  default = []
-}
-
 variable "nat_instance_type" {
   type    = string
   default = "t4g.micro"

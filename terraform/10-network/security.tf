@@ -56,45 +56,6 @@ resource "aws_vpc_security_group_egress_rule" "alb_to_vpc" {
   description       = "Targets inside VPC"
 }
 
-resource "aws_security_group" "admin_alb" {
-  name        = "${var.project}-admin-alb"
-  description = "Internet-facing ALB for Argo CD and Grafana"
-  vpc_id      = aws_vpc.this.id
-
-  tags = {
-    Name = "${var.project}-admin-alb"
-  }
-}
-
-resource "aws_vpc_security_group_ingress_rule" "admin_alb_https" {
-  for_each = toset(var.admin_cidrs)
-
-  security_group_id = aws_security_group.admin_alb.id
-  cidr_ipv4         = each.value
-  ip_protocol       = "tcp"
-  from_port         = 443
-  to_port           = 443
-  description       = "HTTPS from admin"
-}
-
-resource "aws_vpc_security_group_ingress_rule" "admin_alb_http_redirect" {
-  for_each = toset(var.admin_cidrs)
-
-  security_group_id = aws_security_group.admin_alb.id
-  cidr_ipv4         = each.value
-  ip_protocol       = "tcp"
-  from_port         = 80
-  to_port           = 80
-  description       = "HTTP redirect from admin"
-}
-
-resource "aws_vpc_security_group_egress_rule" "admin_alb_to_vpc" {
-  security_group_id = aws_security_group.admin_alb.id
-  cidr_ipv4         = var.vpc_cidr
-  ip_protocol       = "-1"
-  description       = "Targets inside VPC"
-}
-
 resource "aws_security_group" "windows" {
   name        = "${var.project}-windows"
   description = "Windows test instance"

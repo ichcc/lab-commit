@@ -5,20 +5,7 @@ resource "aws_subnet" "public" {
   map_public_ip_on_launch = false
 
   tags = {
-    Name                     = "${var.project}-public-nat-${local.azs[0]}"
-    "kubernetes.io/role/elb" = "1"
-  }
-}
-
-resource "aws_subnet" "public_alb" {
-  vpc_id                  = aws_vpc.this.id
-  cidr_block              = var.public_alb_subnet_cidr
-  availability_zone       = local.azs[1]
-  map_public_ip_on_launch = false
-
-  tags = {
-    Name                     = "${var.project}-public-alb-${local.azs[1]}"
-    "kubernetes.io/role/elb" = "1"
+    Name = "${var.project}-public-nat-${local.azs[0]}"
   }
 }
 
@@ -45,11 +32,6 @@ resource "aws_route_table" "public" {
 
 resource "aws_route_table_association" "public" {
   subnet_id      = aws_subnet.public.id
-  route_table_id = aws_route_table.public.id
-}
-
-resource "aws_route_table_association" "public_alb" {
-  subnet_id      = aws_subnet.public_alb.id
   route_table_id = aws_route_table.public.id
 }
 

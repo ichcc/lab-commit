@@ -22,9 +22,6 @@ db:
 ingress:
   certificateArn: $(out 50-edge certificate_arn)
   securityGroupId: $(out 10-network alb_security_group_id)
-publicIngress:
-  enabled: true
-  securityGroupId: $(out 10-network admin_alb_security_group_id)
 VALUES
 
 echo "wrote $target"

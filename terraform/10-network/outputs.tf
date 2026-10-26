@@ -18,10 +18,6 @@ output "alb_security_group_id" {
   value = aws_security_group.alb.id
 }
 
-output "admin_alb_security_group_id" {
-  value = aws_security_group.admin_alb.id
-}
-
 output "windows_security_group_id" {
   value = aws_security_group.windows.id
 }

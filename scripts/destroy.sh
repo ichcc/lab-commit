@@ -12,13 +12,13 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 stacks=(70-pipeline 60-windows 50-edge 40-data 30-platform 20-eks 10-network)
 [[ "$include_bootstrap" == "--with-bootstrap" ]] && stacks+=(00-bootstrap)
 cluster="lab-commit-eks"
-alb_groups=(lab-commit lab-admin)
-alb_prefixes=(k8s-labcommit k8s-labadmin)
+alb_group="lab-commit"
+alb_prefix="k8s-labcommit"
 
 echo "account: $(aws sts get-caller-identity --query Account --output text)"
 echo "region:  $region"
 echo "cluster: $cluster"
-echo "this deletes the Argo CD applications, the ingresses of ALB groups ${alb_groups[*]} and their ALBs, then destroys: ${stacks[*]}"
+echo "this deletes the Argo CD applications, the ingresses of ALB group ${alb_group} and the ALB, then destroys: ${stacks[*]}"
 read -r -p "type 'destroy lab-commit' to continue: " answer
 if [[ "$answer" != "destroy lab-commit" ]]; then
   echo "aborted"
@@ -45,23 +45,19 @@ if aws eks describe-cluster --region "$region" --name "$cluster" >/dev/null 2>&1
     kubectl -n argocd delete application lab --ignore-not-found --wait=true --timeout=10m
   fi
 
-  for alb_group in "${alb_groups[@]}"; do
-    echo "deleting ingresses of ALB group ${alb_group}"
-    kubectl get ingress --all-namespaces \
-      -o jsonpath="{range .items[?(@.metadata.annotations.alb\.ingress\.kubernetes\.io/group\.name=='${alb_group}')]}{.metadata.namespace}{' '}{.metadata.name}{'\n'}{end}" |
-      while read -r namespace name; do
-        [[ -z "$name" ]] && continue
-        kubectl -n "$namespace" delete ingress "$name" --wait=true --timeout=10m
-      done
-  done
+  echo "deleting ingresses of ALB group ${alb_group}"
+  kubectl get ingress --all-namespaces \
+    -o jsonpath="{range .items[?(@.metadata.annotations.alb\.ingress\.kubernetes\.io/group\.name=='${alb_group}')]}{.metadata.namespace}{' '}{.metadata.name}{'\n'}{end}" |
+    while read -r namespace name; do
+      [[ -z "$name" ]] && continue
+      kubectl -n "$namespace" delete ingress "$name" --wait=true --timeout=10m
+    done
 fi
 
-alb_filter="$(printf "starts_with(LoadBalancerName, '%s') || " "${alb_prefixes[@]}")"
-alb_filter="${alb_filter% || }"
-echo "waiting for load balancers named ${alb_prefixes[*]/%/*} to disappear"
+echo "waiting for load balancers named ${alb_prefix}* to disappear"
 for _ in $(seq 1 60); do
   count="$(aws elbv2 describe-load-balancers --region "$region" \
-    --query "length(LoadBalancers[?${alb_filter}])" --output text)"
+    --query "length(LoadBalancers[?starts_with(LoadBalancerName, '${alb_prefix}')])" --output text)"
   [[ "$count" == "0" ]] && break
   echo "  $count left"
   sleep 10

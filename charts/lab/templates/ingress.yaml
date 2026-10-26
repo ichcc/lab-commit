@@ -7,7 +7,7 @@ metadata:
     {{- include "lab.labels" . | nindent 4 }}
     {{- include "lab.selector" "frontend" | nindent 4 }}
   annotations:
-    {{- include "lab.albAnnotations" (list . "internal" .Values.ingress.groupName .Values.ingress.securityGroupId) | nindent 4 }}
+    {{- include "lab.albAnnotations" . | nindent 4 }}
     alb.ingress.kubernetes.io/group.order: "10"
     alb.ingress.kubernetes.io/healthcheck-path: /healthz
     alb.ingress.kubernetes.io/target-group-attributes: {{ printf "deregistration_delay.timeout_seconds=%v" .Values.ingress.deregistrationDelaySeconds }}

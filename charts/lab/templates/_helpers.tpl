@@ -40,14 +40,18 @@ capabilities:
 {{- end -}}
 
 {{- define "lab.albAnnotations" -}}
-alb.ingress.kubernetes.io/scheme: internal
+{{- $root := index . 0 -}}
+{{- $scheme := index . 1 -}}
+{{- $group := index . 2 -}}
+{{- $securityGroupId := index . 3 -}}
+alb.ingress.kubernetes.io/scheme: {{ $scheme }}
 alb.ingress.kubernetes.io/target-type: ip
-alb.ingress.kubernetes.io/group.name: {{ .Values.ingress.groupName }}
+alb.ingress.kubernetes.io/group.name: {{ $group }}
 alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
 alb.ingress.kubernetes.io/ssl-redirect: "443"
-alb.ingress.kubernetes.io/ssl-policy: {{ .Values.ingress.sslPolicy }}
-alb.ingress.kubernetes.io/certificate-arn: {{ required "ingress.certificateArn is required" .Values.ingress.certificateArn }}
-{{- with .Values.ingress.securityGroupId }}
+alb.ingress.kubernetes.io/ssl-policy: {{ $root.Values.ingress.sslPolicy }}
+alb.ingress.kubernetes.io/certificate-arn: {{ required "ingress.certificateArn is required" $root.Values.ingress.certificateArn }}
+{{- with $securityGroupId }}
 alb.ingress.kubernetes.io/security-groups: {{ . }}
 alb.ingress.kubernetes.io/manage-backend-security-group-rules: "false"
 {{- end }}

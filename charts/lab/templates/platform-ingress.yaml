@@ -1,17 +1,22 @@
 {{- if .Values.platformIngress.enabled }}
+{{- $variants := list (list "" "internal" .Values.ingress.groupName .Values.ingress.securityGroupId) }}
+{{- if .Values.publicIngress.enabled }}
+{{- $variants = append $variants (list "-public" "internet-facing" .Values.publicIngress.groupName (required "publicIngress.securityGroupId is required" .Values.publicIngress.securityGroupId)) }}
+{{- end }}
+{{- range $variant := $variants }}
 {{- range $index, $name := list "argocd" "grafana" }}
 {{- $app := index $.Values.platformIngress $name }}
 ---
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ $name }}
+  name: {{ $name }}{{ index $variant 0 }}
   namespace: {{ $app.namespace }}
   labels:
     {{- include "lab.labels" $ | nindent 4 }}
     {{- include "lab.selector" $name | nindent 4 }}
   annotations:
-    {{- include "lab.albAnnotations" $ | nindent 4 }}
+    {{- include "lab.albAnnotations" (list $ (index $variant 1) (index $variant 2) (index $variant 3)) | nindent 4 }}
     alb.ingress.kubernetes.io/group.order: {{ add 20 $index | quote }}
     alb.ingress.kubernetes.io/healthcheck-path: {{ $app.healthcheckPath }}
 spec:
@@ -27,5 +32,6 @@ spec:
                 name: {{ $app.service }}
                 port:
                   number: {{ $app.port }}
+{{- end }}
 {{- end }}
 {{- end }}

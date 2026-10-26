@@ -75,6 +75,11 @@ platformIngress:
     port: 80
     healthcheckPath: /api/health
 
+publicIngress:
+  enabled: false
+  groupName: lab-admin
+  securityGroupId: ""
+
 keda:
   enabled: true
   serverAddress: http://prometheus-server.monitoring.svc.cluster.local

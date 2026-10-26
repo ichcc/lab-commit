@@ -50,6 +50,17 @@ resource "aws_vpc_security_group_ingress_rule" "alb_to_pods" {
   description                  = "ALB to pods ${each.value}"
 }
 
+resource "aws_vpc_security_group_ingress_rule" "admin_alb_to_pods" {
+  for_each = toset([for p in var.pod_ports : tostring(p)])
+
+  security_group_id            = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
+  referenced_security_group_id = local.admin_alb_sg_id
+  ip_protocol                  = "tcp"
+  from_port                    = tonumber(each.value)
+  to_port                      = tonumber(each.value)
+  description                  = "Admin ALB to pods ${each.value}"
+}
+
 resource "aws_vpc_security_group_ingress_rule" "windows_to_api" {
   security_group_id            = aws_eks_cluster.this.vpc_config[0].cluster_security_group_id
   referenced_security_group_id = local.windows_sg_id

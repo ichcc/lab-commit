@@ -111,12 +111,13 @@ Result:
 - VPC `10.20.0.0/16`, DNS hostnames enabled
 - 2 private subnets in 2 AZs holding every workload
 - 1 small public subnet that contains only the fck-nat instance, with an internet gateway
+- A second public subnet in the other AZ, `10.20.3.0/24`. Both public subnets carry `kubernetes.io/role/elb=1`, because an internet-facing ALB needs subnets in two AZs. Only the admin ALB uses them
 - fck-nat (t4g.micro, ASG-backed) giving the private route table a default route for outbound traffic, so Argo CD, CodeBuild and Helm can reach GitHub
 - One private route table with local routes, the S3 gateway endpoint and the NAT default route
 - Interface endpoints (ECR, STS, Logs, EC2, ELB, SSM, Secrets Manager, EKS, CodeBuild, KMS) in both subnets
-- Security groups: endpoints (443 from VPC), ALB (80/443 from VPC), Windows (egress only to VPC and S3, so it has no Internet access)
+- Security groups: endpoints (443 from VPC), ALB (80/443 from VPC), admin ALB (80/443 from `admin_cidrs` only), Windows (egress only to VPC and S3, so it has no Internet access)
 
-Nothing in the VPC is reachable from the Internet: the public subnet has no workloads, the load balancer is internal, and inbound traffic to the NAT instance is limited to the VPC CIDR.
+The application is not reachable from the Internet: the public subnets have no workloads, the application ALB is internal, and inbound traffic to the NAT instance is limited to the VPC CIDR. The only Internet-facing entry is the admin ALB for Argo CD and Grafana, and its security group admits only the addresses in `admin_cidrs` (set it in `terraform.tfvars` of this stack, `x.x.x.x/32`). An empty list closes it.
 
 The fck-nat module is pinned to release `v1.6.1` through `?ref=` in `nat.tf`. To upgrade, change the tag, run `terraform init -upgrade` and review the plan for NAT replacement. Provider versions are pinned by the committed `.terraform.lock.hcl` in each stack.
 
@@ -146,7 +147,7 @@ Result:
 - CoreDNS addon configured to run on Fargate
 - OIDC provider for IRSA (EKS Pod Identity is not supported on Fargate)
 - ECR pull-through cache rules: `ecr-public/`, `k8s/`, `quay/`. Docker Hub and GHCR need registry credentials in Secrets Manager and are not configured
-- Cluster security group accepts the ALB security group on ports 80, 3000, 8000, 8080, 9090 only, and the Windows security group on 443 for the admin tunnel to the private API endpoint
+- Cluster security group accepts the ALB and admin ALB security groups on ports 80, 3000, 8000, 8080, 9090 only, and the Windows security group on 443 for the admin tunnel to the private API endpoint
 
 Image paths for later stacks follow this pattern:
 
@@ -342,6 +343,7 @@ The pipeline in stack 70 builds and pushes both images to the `lab/backend` and 
 | Ingress `frontend` | Internal ALB, `target-type: ip`, group `lab-commit`, ports 80 and 443 with redirect to 443, ACM certificate, TLS policy `ELBSecurityPolicy-TLS13-1-2-Res-2021-06` (TLS 1.2 and 1.3 only, shared by the whole group), deregistration delay 30 s, host `lab-commit-task.<zone>` |
 | Rollouts without ALB errors | The `lab` namespace carries `elbv2.k8s.aws/pod-readiness-gate-inject: enabled` (set by the Argo CD Application), so a new frontend pod counts as ready only after the ALB reports its target healthy. Frontend pods sleep 15 s in `preStop`, so the ALB stops sending requests before the process exits |
 | Ingresses `argocd`, `grafana` | Same ALB group, created in the `argocd` and `monitoring` namespaces, hosts `argocd.<zone>` and `grafana.<zone>` |
+| Ingresses `argocd-public`, `grafana-public` | Rendered when `publicIngress.enabled`. Internet-facing ALB in group `lab-admin` with the admin ALB security group, same hosts and certificate. The application never joins this group |
 | ScaledObject `frontend` | Prometheus trigger `sum(rate(http_requests_total{namespace="lab"}[1m]))`, `AverageValue` 10, 1 to 4 replicas, `cooldownPeriod` 60, scale-down stabilization 60 s and at most one pod every 30 s |
 
 Required values, taken from Terraform outputs:
@@ -354,6 +356,7 @@ Required values, taken from Terraform outputs:
 | `db.secretArn` | `terraform -chdir=terraform/40-data output -raw db_secret_arn` |
 | `ingress.certificateArn` | `terraform -chdir=terraform/50-edge output -raw certificate_arn` |
 | `ingress.securityGroupId` | `terraform -chdir=terraform/10-network output -raw alb_security_group_id` |
+| `publicIngress.securityGroupId` | `terraform -chdir=terraform/10-network output -raw admin_alb_security_group_id`, required when `publicIngress.enabled` |
 | `zone` | private hosted zone name, default `lab.internal` |
 
 Render and lint:
@@ -512,6 +515,18 @@ In Chrome on the instance:
 - `https://grafana.lab.internal` opens Grafana (user `admin`, password from `terraform -chdir=terraform/30-platform output -raw grafana_admin_password`)
 
 The padlock shows a valid connection: the certificate is issued by `lab-commit lab CA`, which the setup imported. `http://` redirects to `https://`.
+
+### Admin UIs from the workstation
+
+Argo CD and Grafana also sit behind the internet-facing ALB `k8s-labadmin-*`, open only to `admin_cidrs` of stack 10. The hostnames exist only in the private zone, so map them to the ALB addresses in `/etc/hosts`:
+
+```bash
+alb="$(aws elbv2 describe-load-balancers --query "LoadBalancers[?starts_with(LoadBalancerName, 'k8s-labadmin')].DNSName" --output text)"
+ip="$(dig +short "$alb" | head -1)"
+echo "$ip argocd.lab.internal grafana.lab.internal" | sudo tee -a /etc/hosts
+```
+
+Then open `https://argocd.lab.internal` and `https://grafana.lab.internal`. The browser warns until the CA from `terraform -chdir=terraform/50-edge output -raw ca_certificate_pem` is trusted (macOS: Keychain Access, System, set to Always Trust). ALB addresses change over time; when the page stops loading, replace the line. When your public IP changes, update `admin_cidrs` and apply stack 10.
 
 To run the trust script again by hand, in an elevated PowerShell on the instance: `.\trust-cert.ps1` (reads the CA from SSM) or `.\trust-cert.ps1 -PemPath C:\path\ca.pem`.
 
@@ -766,6 +781,7 @@ Run from the workstation unless the line says Windows. `export AWS_REGION=eu-nor
 | Check | Command | Expected |
 |---|---|---|
 | Unreachable from the Internet | `aws elbv2 describe-load-balancers --query "LoadBalancers[?starts_with(LoadBalancerName, 'k8s-labcommit')].Scheme"` and `curl -sk --max-time 10 https://<alb-dns-name>` | `internal`; curl times out |
+| Admin ALB limited to your IP | `aws ec2 describe-security-group-rules --filters Name=group-id,Values="$(terraform -chdir=terraform/10-network output -raw admin_alb_security_group_id)" --query 'SecurityGroupRules[?!IsEgress].[FromPort,CidrIpv4]'` | 80 and 443 from `admin_cidrs` only |
 | Reachable over HTTPS from Windows | Chrome on Windows: `https://lab-commit-task.lab.internal` | `Hello Lab-Commit v1.0.0 <value>`, padlock without warning |
 | HTTP redirects to HTTPS | Windows PowerShell: `(Invoke-WebRequest http://lab-commit-task.lab.internal -MaximumRedirection 0 -ErrorAction SilentlyContinue).StatusCode` | `301` |
 | Certificate is the imported one | `aws acm describe-certificate --certificate-arn "$(terraform -chdir=terraform/50-edge output -raw certificate_arn)" --query 'Certificate.[Type,InUseBy]'` | `IMPORTED`, in use by the ALB |
@@ -795,7 +811,7 @@ The script needs the public endpoint, because it destroys the Windows instance t
 The script asks for the exact phrase `destroy lab-commit`, then:
 
 1. Deletes the Argo CD `root` and `lab` Applications. Their finalizers remove the chart resources, so Argo CD cannot recreate the Ingresses.
-2. Deletes only the Ingresses with the annotation `alb.ingress.kubernetes.io/group.name: lab-commit` and waits until no load balancer named `k8s-labcommit*` is left. Without this step the ALB, its ENIs and its security group rules block the VPC destroy.
+2. Deletes only the Ingresses with the annotation `alb.ingress.kubernetes.io/group.name` set to `lab-commit` or `lab-admin` and waits until no load balancer named `k8s-labcommit*` or `k8s-labadmin*` is left. Without this step the ALB, its ENIs and its security group rules block the VPC destroy.
 3. Runs `terraform destroy` in `70-pipeline`, `60-windows`, `50-edge` (with `alb_ready=false`), `40-data`, `30-platform`, `20-eks`, `10-network`.
 4. Deletes the ECR repositories created by this project: repositories under the prefixes of the pull-through cache rules found in the `20-eks` state (`ecr-public/`, `k8s/`, `quay/`), collected before that stack is destroyed, and the `mirror/` repositories named in `scripts/mirror-images.txt`.
 

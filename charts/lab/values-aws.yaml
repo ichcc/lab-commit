@@ -9,3 +9,6 @@ db:
 ingress:
   certificateArn: arn:aws:acm:eu-north-1:788717064995:certificate/0786efa1-7b20-4cc5-9853-11a13d6bb86c
   securityGroupId: sg-0bce74d73839981f6
+publicIngress:
+  enabled: true
+  securityGroupId: sg-0a130211fdd3fd2ee
